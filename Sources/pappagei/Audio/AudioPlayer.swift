@@ -5,6 +5,7 @@ import AVFoundation
 final class AudioPlayer {
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
+    private let timePitch = AVAudioUnitTimePitch()   // changes rate, keeps pitch natural
     private let format: AVAudioFormat
     private var residual = Data()
     private let queue = DispatchQueue(label: "pappagei.audio")
@@ -13,7 +14,14 @@ final class AudioPlayer {
         format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                sampleRate: sampleRate, channels: 1, interleaved: false)!
         engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: format)
+        engine.attach(timePitch)
+        engine.connect(player, to: timePitch, format: format)
+        engine.connect(timePitch, to: engine.mainMixerNode, format: format)
+    }
+
+    /// Playback speed multiplier with pitch preserved. 1.0 = normal. Takes effect live.
+    func setRate(_ rate: Double) {
+        timePitch.rate = Float(max(0.5, min(2.0, rate)))
     }
 
     /// Start a fresh playback session (call before enqueuing a new utterance).
