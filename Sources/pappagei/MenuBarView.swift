@@ -136,6 +136,7 @@ struct MenuBarView: View {
             Slider(value: $c.speed, in: 0.5...1.5, step: 0.05) { editing in
                 if !editing { c.save() }
             }
+            .onChange(of: c.speed) { _, _ in c.applyRate() }
             Text(String(format: "%.2fx", c.speed)).font(.caption).monospacedDigit()
         }
     }

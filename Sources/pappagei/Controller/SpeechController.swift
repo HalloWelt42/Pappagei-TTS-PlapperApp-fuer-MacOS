@@ -61,6 +61,7 @@ final class SpeechController: ObservableObject {
             self?.toggleSpeakSelection()
         }
         startClipboardWatch()
+        audio.setRate(speed)
         Task { await waitUntilReady() }
     }
 
@@ -159,7 +160,7 @@ final class SpeechController: ObservableObject {
     private func startClipboardWatch() {
         lastClipboardChange = NSPasteboard.general.changeCount
         clipboardTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.checkClipboard()
+            MainActor.assumeIsolated { self?.checkClipboard() }
         }
     }
 
@@ -185,18 +186,23 @@ final class SpeechController: ObservableObject {
         speak(text: text)
     }
 
+    func applyRate() {
+        audio.setRate(speed)
+    }
+
     private func run(text: String, voice: String, model: String, speed: Double) async {
         status = .speaking
         statusText = "Liest vor ..."
+        audio.setRate(speed)        // tempo via audio time-stretch (model speed is unreliable)
         audio.begin()
         let voiceArg = voice.isEmpty ? nil : voice
         // A cloned (custom) voice needs a CustomVoice model.
         let usingCustom = customVoices.contains { $0.id == voice }
         let effectiveModel = (usingCustom && !model.hasSuffix("-clone")) ? model + "-clone" : model
-        AppLog.log("synth start: \(text.count) chars, model=\(effectiveModel), voice=\(voiceArg ?? "default")")
+        AppLog.log("synth start: \(text.count) chars, model=\(effectiveModel), voice=\(voiceArg ?? "default"), rate=\(speed)")
         do {
             try await client.synthesizeStream(text: text, voice: voiceArg,
-                                              model: effectiveModel, speed: speed,
+                                              model: effectiveModel, speed: 1.0,
                                               temperature: self.temperature,
                                               repetitionPenalty: self.repetitionPenalty) { [audio] data in
                 audio.enqueue(data)
