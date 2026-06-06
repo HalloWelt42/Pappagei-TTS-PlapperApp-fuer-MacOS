@@ -24,7 +24,8 @@ final class GlobalHotKey {
         Self.registry[id] = self
 
         let hotKeyID = EventHotKeyID(signature: OSType(0x50415050), id: id)  // 'PAPP'
-        RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetEventDispatcherTarget(), 0, &ref)
+        let status = RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetEventDispatcherTarget(), 0, &ref)
+        AppLog.log("RegisterEventHotKey status=\(status) registered=\(ref != nil)")
     }
 
     deinit {
@@ -32,7 +33,7 @@ final class GlobalHotKey {
         Self.registry[id] = nil
     }
 
-    fileprivate func fire() { action() }
+    fileprivate func fire() { AppLog.log("hotkey fired"); action() }
 
     private static func installHandlerIfNeeded() {
         guard !handlerInstalled else { return }
