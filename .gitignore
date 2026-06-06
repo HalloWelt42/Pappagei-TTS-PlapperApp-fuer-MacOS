@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Swift / build artifacts
+.build/
+.swiftpm/
+DerivedData/
+*.app/
+
+# Generated audio and logs (not source)
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+*.aiff
+*.log
+
+# Model weights and caches (downloaded at runtime)
+models/
+*.safetensors
+*.gguf
+
+# User-provided reference recordings (kept local)
+voices_in/
+
+# macOS clutter
+.DS_Store
+.AppleDouble
+Icon?

@@ -1,0 +1,7 @@
+# pappagei TTS sidecar dependencies
+# Install:  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+mlx-audio
+fastapi
+uvicorn[standard]
+soundfile
+numpy
