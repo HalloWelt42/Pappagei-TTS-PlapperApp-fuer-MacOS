@@ -14,6 +14,9 @@ app="${root}/pappagei.app"
 rm -rf "$app"
 mkdir -p "${app}/Contents/MacOS" "${app}/Contents/Resources"
 cp "$bin" "${app}/Contents/MacOS/pappagei"
+if [ -f "${root}/Resources/AppIcon.icns" ]; then
+    cp "${root}/Resources/AppIcon.icns" "${app}/Contents/Resources/AppIcon.icns"
+fi
 
 cat > "${app}/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -24,6 +27,7 @@ cat > "${app}/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key><string>pappagei</string>
     <key>CFBundleIdentifier</key><string>tech.pappagei.app</string>
     <key>CFBundleExecutable</key><string>pappagei</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>CFBundleShortVersionString</key><string>0.1</string>
