@@ -18,12 +18,15 @@ final class SpeechController: ObservableObject {
     @Published var speed: Double = 1.0
     @Published var temperature: Double = 0.7
     @Published var repetitionPenalty: Double = 1.1
+    @Published var clipboardMode: Bool = false
 
     private let client = TTSClient()
     private let audio = AudioPlayer()
     private let sidecar = SidecarProcess()
     private var hotKey: GlobalHotKey?
     private var speakTask: Task<Void, Never>?
+    private var clipboardTimer: Timer?
+    private var lastClipboardChange = 0
 
     private init() {
         load()
@@ -45,6 +48,8 @@ final class SpeechController: ObservableObject {
     // MARK: lifecycle
 
     func onLaunch() {
+        AppLog.log("onLaunch; trusted=\(AccessibilityPermission.isTrusted)")
+        ActiveAppTracker.shared.start()
         guard sidecar.isInstalled else {
             status = .error("Backend fehlt")
             statusText = "Backend nicht gefunden unter ~/pappagei/backend"
@@ -55,6 +60,7 @@ final class SpeechController: ObservableObject {
                               modifiers: GlobalHotKey.controlShift) { [weak self] in
             self?.toggleSpeakSelection()
         }
+        startClipboardWatch()
         Task { await waitUntilReady() }
     }
 
@@ -117,6 +123,7 @@ final class SpeechController: ObservableObject {
     }
 
     func speakSelection() {
+        AppLog.log("speakSelection; status=\(status); trusted=\(AccessibilityPermission.isTrusted)")
         if status != .ready && !isBusy {
             if status == .downloadingOrLoading { statusText = "Modell lädt noch ..." }
             return
@@ -129,6 +136,7 @@ final class SpeechController: ObservableObject {
             guard let self else { return }
             let captured = await TextCaptureCoordinator.shared.capture()
             guard let text = captured, !text.isEmpty else {
+                AppLog.log("speakSelection: capture leer (trusted=\(AccessibilityPermission.isTrusted))")
                 self.statusText = AccessibilityPermission.isTrusted
                     ? "Kein Text markiert"
                     : "Bitte Bedienungshilfen erlauben"
@@ -146,6 +154,37 @@ final class SpeechController: ObservableObject {
         }
     }
 
+    // MARK: clipboard mode (works everywhere, no Accessibility needed)
+
+    private func startClipboardWatch() {
+        lastClipboardChange = NSPasteboard.general.changeCount
+        clipboardTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.checkClipboard()
+        }
+    }
+
+    private func checkClipboard() {
+        let pasteboard = NSPasteboard.general
+        let change = pasteboard.changeCount
+        guard change != lastClipboardChange else { return }
+        lastClipboardChange = change
+        guard clipboardMode else { return }
+        if [Status.starting, .downloadingOrLoading].contains(status) { return }
+        guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
+        AppLog.log("clipboard changed -> read \(text.count) chars")
+        speak(text: text)
+    }
+
+    func speakClipboard() {
+        let pasteboard = NSPasteboard.general
+        lastClipboardChange = pasteboard.changeCount
+        guard let text = pasteboard.string(forType: .string), !text.isEmpty else {
+            statusText = "Zwischenablage leer"
+            return
+        }
+        speak(text: text)
+    }
+
     private func run(text: String, voice: String, model: String, speed: Double) async {
         status = .speaking
         statusText = "Liest vor ..."
@@ -154,6 +193,7 @@ final class SpeechController: ObservableObject {
         // A cloned (custom) voice needs a CustomVoice model.
         let usingCustom = customVoices.contains { $0.id == voice }
         let effectiveModel = (usingCustom && !model.hasSuffix("-clone")) ? model + "-clone" : model
+        AppLog.log("synth start: \(text.count) chars, model=\(effectiveModel), voice=\(voiceArg ?? "default")")
         do {
             try await client.synthesizeStream(text: text, voice: voiceArg,
                                               model: effectiveModel, speed: speed,
@@ -219,6 +259,7 @@ final class SpeechController: ObservableObject {
         if t > 0 { temperature = t }
         let r = d.double(forKey: "repetitionPenalty")
         if r > 0 { repetitionPenalty = r }
+        clipboardMode = d.bool(forKey: "clipboardMode")
     }
 
     func save() {
@@ -228,5 +269,6 @@ final class SpeechController: ObservableObject {
         d.set(speed, forKey: "speed")
         d.set(temperature, forKey: "temperature")
         d.set(repetitionPenalty, forKey: "repetitionPenalty")
+        d.set(clipboardMode, forKey: "clipboardMode")
     }
 }

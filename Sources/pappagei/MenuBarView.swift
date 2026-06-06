@@ -22,6 +22,8 @@ struct MenuBarView: View {
             Divider()
             controls
             Divider()
+            clipboardRow
+            Divider()
             voicePicker
             manageVoicesButton
             modelPicker
@@ -75,6 +77,23 @@ struct MenuBarView: View {
                 Image(systemName: "stop.fill")
             }
             .disabled(!c.isBusy)
+        }
+    }
+
+    private var clipboardRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Aus Zwischenablage vorlesen", isOn: $c.clipboardMode)
+                .onChange(of: c.clipboardMode) { _, _ in c.save() }
+            Button {
+                c.speakClipboard()
+            } label: {
+                Label("Zwischenablage jetzt vorlesen", systemImage: "doc.on.clipboard")
+            }
+            .buttonStyle(.link)
+            if c.clipboardMode {
+                Text("Kopiere Text (Cmd+C oder Rechtsklick, Kopieren) — pappagei liest ihn automatisch vor. Funktioniert überall, auch im Browser, ohne Bedienungshilfen.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 
