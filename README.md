@@ -1,81 +1,70 @@
 # pappagei
 
-Natives macOS-Vorlese-Tool: markierten Text aus beliebigen Apps vorlesen, lokal
-auf Apple Silicon, mit eigener geklonter Stimme. Engine: Qwen3-TTS via mlx-audio.
-
-## Aufbau
-
-- `backend/` — lokaler TTS-Sidecar (Python, FastAPI). Lädt Qwen3-TTS über
-  mlx-audio, hält das Modell resident, streamt PCM.
-  - `tts_engine.py` — Modell-Wrapper (laden, aufwärmen, Cloning, Streaming)
-  - `voices.py` — Verwaltung eigener Stimmen (Referenz-Clip plus Transkript)
-  - `server.py` — FastAPI: /synthesize, /voices, /model/switch, /warmup, /health
-  - `poc.py` — Machbarkeitstest plus Latenzmessung
-- `Sources/pappagei/` — native Swift-App (Menüleiste): Textgriff, Hotkey, Audio, Stimmen-UI.
-- `scripts/` — Hilfsskripte (Backend starten, App-Bundle bauen).
+Natives macOS-Vorlese-Tool: kopierten oder markierten Text lokal auf Apple
+Silicon vorlesen — mit eigener, geklonter Stimme. Engine: Qwen3-TTS via mlx-audio.
 
 ## Voraussetzungen
 
-- Apple Silicon, macOS 14+, Swift 6.2 (getestet auf M2 / 8 GB / macOS 26).
-  Funktioniert mit den Command Line Tools, volles Xcode ist optional.
-- Daraus:
-  - **Standardmodell: Qwen3-TTS 1.7B CustomVoice (8-bit)** zum Klonen;
-    0.6B CustomVoice (4-bit) als schnelle Ausweichstufe. Umschaltbar im Menü.
-  - Die App wird als **SwiftPM-Paket** gebaut (`swift build`); das `.app`-Bundle
-    wird per Skript zusammengesetzt. Volles Xcode ist optional.
+- Apple Silicon (M1/M2/M3/...), macOS 14 oder neuer.
+- Command Line Tools (liefern Swift):  `xcode-select --install`
+- Python 3.10+  (z.B. `brew install python`)
+- Optional: `ffmpeg` für mp3-Stimmproben (`brew install ffmpeg`); WAV geht ohne.
 
-## Backend einrichten und testen
+## Installation (ein Befehl)
 
 ```bash
-cd backend
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-# Machbarkeit plus Latenz (lädt das 0.6B-Modell beim ersten Lauf herunter):
-.venv/bin/python poc.py
-# Mit eigener Stimme (Referenz ~5-7s, klar gesprochen, ein Sprecher):
-.venv/bin/python poc.py /pfad/zu/stimme.wav "Transkript des Clips"
+git clone git@github.com:HalloWelt42/Pappagei-TTS-PlapperApp-fuer-MacOS.git
+cd Pappagei-TTS-PlapperApp-fuer-MacOS
+./install.sh
 ```
 
-Sidecar starten:
+`install.sh` prüft die Voraussetzungen, legt `backend/.venv` an, installiert die
+Abhängigkeiten, lädt das Standardmodell (1.7B-CustomVoice-8bit, ~1.8 GB) vor und
+baut `pappagei.app`. Mit `./install.sh --no-model` wird das Modell erst beim
+ersten Start geladen.
+
+Starten:
 
 ```bash
-scripts/run_backend.sh
-# Gesundheitscheck:
-curl -s http://127.0.0.1:8765/health
-```
-
-## App bauen und benutzen
-
-```bash
-# .app-Bundle bauen (kein Xcode nötig):
-scripts/make_app.sh debug
-# Starten (Menüleisten-Symbol erscheint oben rechts):
 open pappagei.app
 ```
 
-Beim ersten Start:
-1. Systemeinstellungen, Datenschutz & Sicherheit, Bedienungshilfen: pappagei
-   aktivieren (nötig fürs Lesen der Markierung und den Cmd+C-Fallback). Im Menü
-   gibt es dafür den Knopf "Berechtigung erteilen".
-2. Text markieren und Ctrl+Shift+R drücken, oder im Menü "Auswahl vorlesen".
+## Benutzung
 
-Hinweis: Der unsignierte Dev-Build erhält bei jedem Neubau eine neue Identität,
-daher muss die Bedienungshilfen-Freigabe nach einem Rebuild ggf. erneut gesetzt
-werden.
+- **Empfohlen — überall, ohne Sonderrechte:** im Menü (Vogel-Symbol oben rechts)
+  „Aus Zwischenablage vorlesen" einschalten, dann irgendwo Text kopieren
+  (Cmd+C oder Rechtsklick → Kopieren) — pappagei liest ihn vor. Der Knopf
+  „Zwischenablage jetzt vorlesen" liest den aktuellen Inhalt sofort.
+- **Alternativ — markierten Text direkt:** in Systemeinstellungen → Datenschutz &
+  Sicherheit → Bedienungshilfen pappagei erlauben (Menü-Knopf „Berechtigung
+  erteilen" führt hin), dann Text markieren und **Ctrl+Shift+R**. Manche Browser
+  geben die Markierung nicht frei — dort den Zwischenablage-Modus nutzen.
+- Im Menü: Stimme, Modell (1.7B oder 0.6B), Tempo (live, Tonhöhe bleibt), und
+  unter „Erweitert" Temperatur/Wiederholung. Eigene Stimme über „Stimme
+  verwalten" → WAV/mp3 (~5-7s, klar gesprochen) importieren.
 
-## Status (validiert)
+## Aufbau
 
-- Backend: Cloning (CustomVoice), 24 kHz, Streaming. Auf M2/8 GB echtzeitfähig:
-  1.7B-clone 8-bit (Standard) RTF ~0.87 (erster Ton ~0.6s), 0.6B-clone 4-bit
-  RTF ~0.55. FastAPI-Endpunkte grün.
-- Referenz-Audio: WAV und mp3 funktionieren (mp3 via ffmpeg/miniaudio).
-- App: baut, startet als Menüleisten-Agent, fährt den Sidecar hoch, Modell lädt
-  (~1-2s warm aus Cache; 1.7B 8-bit einmalig ~1.8 GB Download). Stimmen-Import-UI,
-  reaktive Berechtigungsprüfung, klarere Fehlermeldungen.
-- Beobachtung: mit schwacher/synthetischer Referenz und sehr kurzen Einzelsätzen
-  teils zu lange Ausgabe (mögliche Wiederholung); mit sauberer 5-7s-Referenz und
-  Absätzen normal. Bei Bedarf temperature/repetition_penalty justierbar.
-- Tuning: Defaults temp 0.7 / rep 1.1 (validiert, ~20% kürzer als Modell-Standard);
-  im Menü unter "Erweitert" sowie pro Anfrage (temperature, repetition_penalty) justierbar.
-- Offen (Hands-on): Bedienungshilfen-Freigabe, Textgriff real, Audio hören.
-- Später: Wort-Highlighting, echte Download-Fortschrittsanzeige, Notarisierung.
+- `backend/` — Python-TTS-Sidecar (FastAPI + mlx-audio, Qwen3-TTS CustomVoice):
+  `tts_engine.py`, `voices.py`, `server.py`, `requirements.txt`, `selftest.py`.
+- `Sources/pappagei/` — native Swift-Menüleisten-App (SwiftPM-Paket).
+- `scripts/` — `make_app.sh` (App-Bundle bauen), `run_backend.sh`, `make_icon.swift`.
+- `install.sh` — Einrichtung in einem Schritt.
+
+## Technik & Status
+
+- Modelle: Qwen3-TTS CustomVoice — Standard **1.7B (8-bit)**, Ausweichstufe
+  **0.6B (4-bit)**, im Menü umschaltbar. Auf M2/8 GB echtzeitfähig
+  (RTF ~0.87 bzw. ~0.55), 24 kHz Streaming.
+- Tempo über `AVAudioUnitTimePitch` (Tonhöhe bleibt; der Modell-Parameter `speed`
+  wirkt praktisch nicht).
+- Referenz-Audio: WAV und mp3 (mp3 via ffmpeg/miniaudio).
+- Selbsttest:  `(cd backend && .venv/bin/python selftest.py)` → schreibt `selftest.wav`.
+
+## Hinweise
+
+- Der Dev-Build ist ad-hoc signiert: nach einem Neubau muss eine
+  Bedienungshilfen-Freigabe ggf. neu gesetzt werden — für den Zwischenablage-Modus
+  ist keine Freigabe nötig.
+- Modelle, `.venv`, Build-Artefakte und erzeugte Audiodateien liegen nicht im Repo
+  (siehe `.gitignore`); sie werden lokal von `install.sh` erzeugt.
