@@ -13,8 +13,12 @@ final class SidecarProcess {
     private let logURL: URL
 
     init() {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        backendDir = home.appending(path: "pappagei/backend")
+        let fm = FileManager.default
+        // The built .app sits at the repo root next to backend/, so resolve relative
+        // to the bundle first (works from any clone location); fall back to ~/pappagei.
+        let sibling = Bundle.main.bundleURL.deletingLastPathComponent().appending(path: "backend")
+        let home = fm.homeDirectoryForCurrentUser.appending(path: "pappagei/backend")
+        backendDir = fm.fileExists(atPath: sibling.appending(path: ".venv/bin/python").path) ? sibling : home
         python = backendDir.appending(path: ".venv/bin/python")
         logURL = backendDir.appending(path: "sidecar.log")
     }
