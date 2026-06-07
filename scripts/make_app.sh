@@ -18,7 +18,7 @@ if [ -f "${root}/Resources/AppIcon.icns" ]; then
     cp "${root}/Resources/AppIcon.icns" "${app}/Contents/Resources/AppIcon.icns"
 fi
 
-cat > "${app}/Contents/Info.plist" <<'PLIST'
+cat > "${app}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -35,6 +35,8 @@ cat > "${app}/Contents/Info.plist" <<'PLIST'
     <key>LSUIElement</key><true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>pappagei liest markierten Text vor.</string>
+    <key>PGBackendPath</key>
+    <string>${root}/backend</string>
 </dict>
 </plist>
 PLIST
@@ -42,6 +44,9 @@ PLIST
 if ! codesign --force --deep --sign - "$app" >/dev/null 2>&1; then
     echo "warning: ad-hoc codesign skipped"
 fi
+
+# Clear quarantine/xattrs to avoid Gatekeeper app translocation.
+if xattr -cr "$app" >/dev/null 2>&1; then :; fi
 
 # Register with LaunchServices so `open` works immediately after building.
 LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
