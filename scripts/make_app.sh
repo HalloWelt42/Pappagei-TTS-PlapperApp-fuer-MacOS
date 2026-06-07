@@ -37,6 +37,25 @@ cat > "${app}/Contents/Info.plist" <<PLIST
     <string>pappagei liest markierten Text vor.</string>
     <key>PGBackendPath</key>
     <string>${root}/backend</string>
+    <key>NSServices</key>
+    <array>
+      <dict>
+        <key>NSMenuItem</key>
+        <dict>
+          <key>default</key>
+          <string>Vorlesen mit pappagei</string>
+        </dict>
+        <key>NSMessage</key>
+        <string>readSelection</string>
+        <key>NSPortName</key>
+        <string>pappagei</string>
+        <key>NSSendTypes</key>
+        <array>
+          <string>public.utf8-plain-text</string>
+          <string>NSStringPboardType</string>
+        </array>
+      </dict>
+    </array>
 </dict>
 </plist>
 PLIST
