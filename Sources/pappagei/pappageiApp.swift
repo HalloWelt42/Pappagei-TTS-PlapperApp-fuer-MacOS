@@ -22,9 +22,14 @@ struct pappageiApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let serviceProvider = ServiceProvider()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu-bar agent: no Dock icon, no main window.
         NSApp.setActivationPolicy(.accessory)
+        // System-wide "Vorlesen mit pappagei" service (no Accessibility needed).
+        NSApp.servicesProvider = serviceProvider
+        NSUpdateDynamicServices()
         SpeechController.shared.onLaunch()
     }
 
