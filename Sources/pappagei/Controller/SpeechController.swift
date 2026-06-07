@@ -14,7 +14,7 @@ final class SpeechController: ObservableObject {
     @Published var speakers: [String] = []
     @Published var customVoices: [CustomVoice] = []
     @Published var selectedVoice: String = ""        // base speaker or custom voice id
-    @Published var model = "1.7b-clone"
+    @Published var model = "0.6b"
     @Published var speed: Double = 1.0
     @Published var temperature: Double = 0.7
     @Published var repetitionPenalty: Double = 1.1
@@ -196,13 +196,10 @@ final class SpeechController: ObservableObject {
         audio.setRate(speed)        // tempo via audio time-stretch (model speed is unreliable)
         audio.begin()
         let voiceArg = voice.isEmpty ? nil : voice
-        // A cloned (custom) voice needs a CustomVoice model.
-        let usingCustom = customVoices.contains { $0.id == voice }
-        let effectiveModel = (usingCustom && !model.hasSuffix("-clone")) ? model + "-clone" : model
-        AppLog.log("synth start: \(text.count) chars, model=\(effectiveModel), voice=\(voiceArg ?? "default"), rate=\(speed)")
+        AppLog.log("synth start: \(text.count) chars, model=\(model), voice=\(voiceArg ?? "default"), rate=\(speed)")
         do {
             try await client.synthesizeStream(text: text, voice: voiceArg,
-                                              model: effectiveModel, speed: 1.0,
+                                              model: model, speed: 1.0,
                                               temperature: self.temperature,
                                               repetitionPenalty: self.repetitionPenalty) { [audio] data in
                 audio.enqueue(data)

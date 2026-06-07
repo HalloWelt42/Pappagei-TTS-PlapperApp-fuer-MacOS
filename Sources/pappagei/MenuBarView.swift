@@ -10,10 +10,8 @@ struct MenuBarView: View {
     private let axTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     private let models: [(key: String, label: String)] = [
-        ("1.7b-clone", "1.7B Klonen 8-bit (Standard)"),
-        ("0.6b-clone", "0.6B Klonen (schnell)"),
-        ("1.7b", "1.7B Presets"),
-        ("0.6b", "0.6B Presets"),
+        ("0.6b", "0.6B (schnell)"),
+        ("1.7b", "1.7B (Qualität)"),
     ]
 
     var body: some View {

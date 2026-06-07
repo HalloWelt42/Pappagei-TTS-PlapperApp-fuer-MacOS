@@ -102,7 +102,7 @@ def list_voices() -> dict:
 
 @app.post("/voices/import")
 def import_voice(req: ImportRequest) -> dict:
-    return store.import_voice(req.name, req.audio_path, req.transcript, req.speaker or "vivian")
+    return store.import_voice(req.name, req.audio_path, req.transcript, req.speaker or "Chelsie")
 
 
 @app.delete("/voices/{vid}")

@@ -1,20 +1,12 @@
-"""pappagei TTS engine: a thin wrapper around mlx-audio Qwen3-TTS.
+"""pappagei TTS engine: Qwen3-TTS (Base model) via mlx-audio.
 
-Verified mlx-audio generate() signature (Qwen3-TTS):
-    generate(text, voice=None, instruct=None, temperature=0.9, speed=1.0,
-             lang_code='auto', ref_audio=None, ref_text=None, split_pattern='\\n',
-             max_tokens=4096, stream=False, streaming_interval=2.0, ...)
-
-Learned from the POC:
-  - `voice` (a base speaker name) is ALWAYS required, including for the
-    CustomVoice cloning model. Cloning = a speaker plus ref_audio/ref_text.
-  - Language is controlled via `lang_code` ('auto' detects from the text).
-  - `stream=True` yields partial audio during generation (lower latency).
-  - Output is a 24 kHz mono float waveform in result.audio.
+Voice cloning: the Base model has a speaker_encoder, so passing `ref_audio` alone
+(NO transcript, no extra model) clones the speaker's voice. Built-in presets are
+used when no ref_audio is given. CustomVoice/VoiceDesign variants do NOT clone
+from a reference and are intentionally not used.
 """
 from __future__ import annotations
 
-import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -25,38 +17,18 @@ import numpy as np
 from mlx_audio.tts.utils import load_model
 
 MODELS = {
-    # Base models: built-in preset voices (e.g. "Chelsie").
-    "0.6b": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",
-    "1.7b": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
-    # CustomVoice models: zero-shot cloning from a reference clip.
-    "0.6b-clone": "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit",   # lighter, faster fallback
-    "1.7b-clone": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",   # primary solution
+    "0.6b": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",   # default, cloning-capable
+    "1.7b": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",   # higher quality
 }
-# 1.7B CustomVoice (8-bit) is the chosen model solution; 0.6B stays as a fast fallback.
-DEFAULT_MODEL = "1.7b-clone"
-
-# Each model family accepts a DIFFERENT set of base speaker names (confirmed in POC).
+DEFAULT_MODEL = "0.6b"
 BASE_SPEAKERS = ["Chelsie", "Ethan", "Vivian"]
-CLONE_SPEAKERS = [
-    "serena", "vivian", "uncle_fu", "ryan", "aiden",
-    "ono_anna", "sohee", "eric", "dylan",
-]
-DEFAULT_VOICE = "Chelsie"            # default base-model preset
-DEFAULT_CLONE_SPEAKER = "vivian"     # default base speaker for the clone model
-DEFAULT_LANG_CODE = "auto"           # detect language from text; or force e.g. "de"
-DEFAULT_SAMPLE_RATE = 24000          # confirmed: 24 kHz mono
-
-# Sentence splitter on terminator characters only (a character class, no
-# alternation, hence no pipe characters).
-_SENTENCE_RE = re.compile(r"[.!?…\n]+")
-
-
-def split_sentences(text: str) -> List[str]:
-    return [part.strip() for part in _SENTENCE_RE.split(text) if part.strip()]
+DEFAULT_VOICE = "Chelsie"
+DEFAULT_LANG_CODE = "auto"
+DEFAULT_SAMPLE_RATE = 24000
+CLONE_REPETITION_PENALTY = 1.3   # keeps cloned output from rambling
 
 
 def _to_waveform(audio_obj) -> np.ndarray:
-    """Convert an mlx/ndarray/list audio object to a flat float32 numpy array."""
     if isinstance(audio_obj, np.ndarray):
         return audio_obj.astype(np.float32).reshape(-1)
     try:
@@ -67,15 +39,11 @@ def _to_waveform(audio_obj) -> np.ndarray:
 
 @dataclass
 class Voice:
-    """A Qwen3-TTS voice: a required base speaker, optionally cloned via reference.
-
-    For the CustomVoice model, `speaker` is always required; `ref_audio` (plus an
-    optional transcript) adapts the timbre toward the reference recording.
-    """
+    """A preset speaker, or a clone from a reference clip (audio only, no transcript)."""
     name: str
     speaker: str = DEFAULT_VOICE
     ref_audio: Optional[str] = None
-    ref_text: Optional[str] = None
+    ref_text: Optional[str] = None   # optional; not needed for cloning
 
 
 @dataclass
@@ -84,9 +52,9 @@ class Engine:
     lang_code: str = DEFAULT_LANG_CODE
     sample_rate: int = DEFAULT_SAMPLE_RATE
     streaming_interval: float = 0.5
-    temperature: float = 0.7          # lower than the 0.9 default to curb rambling
+    temperature: float = 0.7
     top_p: float = 0.9
-    repetition_penalty: float = 1.1   # discourages repeated/looped tokens
+    repetition_penalty: float = 1.1
     _model: object = field(default=None, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -106,21 +74,10 @@ class Engine:
         if self._model is None:
             self.load()
 
-    @property
-    def is_clone_model(self) -> bool:
-        return self.model_key.endswith("-clone")
-
     def supported_speakers(self) -> List[str]:
-        return CLONE_SPEAKERS if self.is_clone_model else BASE_SPEAKERS
-
-    def _resolve_speaker(self, voice: Voice) -> str:
-        """Pick a base speaker valid for the current model (families differ)."""
-        if voice.speaker in self.supported_speakers():
-            return voice.speaker
-        return DEFAULT_CLONE_SPEAKER if self.is_clone_model else DEFAULT_VOICE
+        return BASE_SPEAKERS
 
     def warmup(self, voice: Optional[Voice] = None) -> float:
-        """Run one tiny synthesis so the first real request is fast."""
         self.ensure_loaded()
         v = voice or Voice("warmup")
         t0 = time.perf_counter()
@@ -131,21 +88,26 @@ class Engine:
     def _generate(self, text: str, voice: Voice, speed: float = 1.0,
                   temperature: Optional[float] = None,
                   repetition_penalty: Optional[float] = None) -> Iterator[np.ndarray]:
+        temp = self.temperature if temperature is None else temperature
+        rep = self.repetition_penalty if repetition_penalty is None else repetition_penalty
         kwargs = dict(
             text=text,
-            voice=self._resolve_speaker(voice),   # always required, model-specific
             lang_code=self.lang_code,
             speed=speed,
-            temperature=self.temperature if temperature is None else temperature,
+            temperature=temp,
             top_p=self.top_p,
-            repetition_penalty=self.repetition_penalty if repetition_penalty is None else repetition_penalty,
             stream=True,
             streaming_interval=self.streaming_interval,
         )
         if voice.ref_audio:
+            # Audio-only voice cloning via the speaker encoder (no transcript needed).
             kwargs["ref_audio"] = voice.ref_audio
+            kwargs["repetition_penalty"] = max(rep, CLONE_REPETITION_PENALTY)
             if voice.ref_text:
                 kwargs["ref_text"] = voice.ref_text
+        else:
+            kwargs["voice"] = voice.speaker or DEFAULT_VOICE
+            kwargs["repetition_penalty"] = rep
         for result in self._model.generate(**kwargs):
             rate = getattr(result, "sample_rate", None)
             if rate:
@@ -158,9 +120,7 @@ class Engine:
         """Yield little-endian int16 mono PCM, streaming as the model generates."""
         self.ensure_loaded()
         with self._lock:
-            for wave in self._generate(text, voice, speed,
-                                       temperature=temperature,
-                                       repetition_penalty=repetition_penalty):
+            for wave in self._generate(text, voice, speed, temperature, repetition_penalty):
                 if wave.size == 0:
                     continue
                 clipped = np.clip(wave, -1.0, 1.0)
