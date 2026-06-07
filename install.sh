@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # pappagei — One-shot installer for macOS (Apple Silicon).
 #
-#   ./install.sh             full setup including the ~1.8 GB model download
+#   ./install.sh             full setup including the ~1.2 GB model download
 #   ./install.sh --no-model  skip the model download (loads on first start)
 #
 # Idempotent: safe to re-run.
@@ -33,12 +33,12 @@ python3 -m venv backend/.venv
 backend/.venv/bin/python -m pip install --quiet --upgrade pip
 backend/.venv/bin/pip install -r backend/requirements.txt
 
-step "3/5  Sprachmodell vorbereiten (1.7B-CustomVoice-8bit, ~1.8 GB)"
+step "3/5  Sprachmodell vorbereiten (Base 0.6B, ~1.2 GB)"
 if [ "$SKIP_MODEL" = "--no-model" ]; then
     echo "uebersprungen (--no-model) — wird beim ersten Start automatisch geladen."
 else
     ( cd backend && TOKENIZERS_PARALLELISM=false .venv/bin/python -c \
-        "from tts_engine import Engine; e=Engine(model_key='1.7b-clone'); e.load(); print('Modell bereit:', e.model_key)" )
+        "from tts_engine import Engine; e=Engine(); e.load(); print('Modell bereit:', e.model_key)" )
 fi
 
 step "4/5  App bauen (.app-Bundle)"

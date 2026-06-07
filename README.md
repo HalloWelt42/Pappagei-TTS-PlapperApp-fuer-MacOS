@@ -19,7 +19,7 @@ cd Pappagei-TTS-PlapperApp-fuer-MacOS
 ```
 
 `install.sh` prüft die Voraussetzungen, legt `backend/.venv` an, installiert die
-Abhängigkeiten, lädt das Standardmodell (1.7B-CustomVoice-8bit, ~1.8 GB) vor und
+Abhängigkeiten, lädt das Standardmodell (Base 0.6B, ~1.2 GB) vor und
 baut `pappagei.app`. Mit `./install.sh --no-model` wird das Modell erst beim
 ersten Start geladen.
 
@@ -45,7 +45,7 @@ open pappagei.app
 
 ## Aufbau
 
-- `backend/` — Python-TTS-Sidecar (FastAPI + mlx-audio, Qwen3-TTS CustomVoice):
+- `backend/` — Python-TTS-Sidecar (FastAPI + mlx-audio, Qwen3-TTS Base, Cloning per Sprecher-Encoder):
   `tts_engine.py`, `voices.py`, `server.py`, `requirements.txt`, `selftest.py`.
 - `Sources/pappagei/` — native Swift-Menüleisten-App (SwiftPM-Paket).
 - `scripts/` — `make_app.sh` (App-Bundle bauen), `run_backend.sh`, `make_icon.swift`.

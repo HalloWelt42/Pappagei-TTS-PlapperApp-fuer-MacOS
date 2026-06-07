@@ -62,7 +62,7 @@ app = FastAPI(title="pappagei-tts", lifespan=lifespan)
 class SynthRequest(BaseModel):
     text: str
     voice: Optional[str] = None     # custom voice id/name, or a base speaker
-    model: Optional[str] = None     # "0.6b-clone", "1.7b-clone", "0.6b", "1.7b"
+    model: Optional[str] = None     # "0.6b" or "1.7b"
     speed: float = 1.0
     temperature: Optional[float] = None
     repetition_penalty: Optional[float] = None
