@@ -43,4 +43,8 @@ if ! codesign --force --deep --sign - "$app" >/dev/null 2>&1; then
     echo "warning: ad-hoc codesign skipped"
 fi
 
+# Register with LaunchServices so `open` works immediately after building.
+LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+[ -x "$LSREG" ] && "$LSREG" -f "$app"
+
 echo "built ${app}"
