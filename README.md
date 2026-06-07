@@ -53,9 +53,9 @@ open pappagei.app
 
 ## Technik & Status
 
-- Modelle: Qwen3-TTS CustomVoice — Standard **1.7B (8-bit)**, Ausweichstufe
-  **0.6B (4-bit)**, im Menü umschaltbar. Auf M2/8 GB echtzeitfähig
-  (RTF ~0.87 bzw. ~0.55), 24 kHz Streaming.
+- Modelle: Qwen3-TTS **Base** — 0.6B (Standard) und 1.7B (höhere Qualität),
+  im Menü umschaltbar, 24 kHz Streaming. **Voice-Cloning** aus Referenz-Audio
+  über den Sprecher-Encoder des Base-Modells — **kein Transkript, kein Whisper**.
 - Tempo über `AVAudioUnitTimePitch` (Tonhöhe bleibt; der Modell-Parameter `speed`
   wirkt praktisch nicht).
 - Referenz-Audio: WAV und mp3 (mp3 via ffmpeg/miniaudio).

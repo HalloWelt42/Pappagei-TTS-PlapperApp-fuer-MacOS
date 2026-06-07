@@ -6,16 +6,9 @@ struct VoiceManagerView: View {
     @ObservedObject private var c = SpeechController.shared
 
     @State private var name = ""
-    @State private var transcript = ""
-    @State private var speaker = "vivian"
     @State private var pickedURL: URL?
     @State private var busy = false
     @State private var message = ""
-
-    private let cloneSpeakers = [
-        "serena", "vivian", "uncle_fu", "ryan", "aiden",
-        "ono_anna", "sohee", "eric", "dylan",
-    ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -23,7 +16,7 @@ struct VoiceManagerView: View {
 
             GroupBox("Eigene Stimmen") {
                 if c.customVoices.isEmpty {
-                    Text("Noch keine eigene Stimme importiert.")
+                    Text("Noch keine eigene Stimme.")
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
@@ -55,12 +48,6 @@ struct VoiceManagerView: View {
                             .truncationMode(.middle)
                     }
                     TextField("Name", text: $name)
-                    TextField("Transkript des Clips (optional, verbessert die Qualität)",
-                              text: $transcript, axis: .vertical)
-                        .lineLimit(1...3)
-                    Picker("Basis-Sprecher", selection: $speaker) {
-                        ForEach(cloneSpeakers, id: \.self) { Text($0).tag($0) }
-                    }
                     HStack {
                         Button(busy ? "Importiere …" : "Importieren") { startImport() }
                             .disabled(busy || pickedURL == nil || name.isEmpty)
@@ -78,12 +65,12 @@ struct VoiceManagerView: View {
             }
             .disabled(c.selectedVoice.isEmpty)
 
-            Text("Tipp: ~5-7s, klar gesprochen, ein Sprecher, wenig Störgeräusch. WAV bevorzugt; mp3/m4a meist auch ok.")
+            Text("Tipp: ~5-10s klar gesprochen, ein Sprecher, wenig Störgeräusch. WAV oder mp3. Kein Transkript nötig — Qwen klont direkt aus dem Audio.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(16)
-        .frame(width: 400)
+        .frame(width: 380)
     }
 
     private func pickFile() {
@@ -104,18 +91,12 @@ struct VoiceManagerView: View {
         busy = true
         message = ""
         Task {
-            let ok = await c.importVoice(
-                name: name,
-                path: url.path,
-                transcript: transcript.isEmpty ? nil : transcript,
-                speaker: speaker
-            )
+            let ok = await c.importVoice(name: name, path: url.path, transcript: nil, speaker: "Chelsie")
             busy = false
             message = ok ? "Importiert und ausgewählt." : "Import fehlgeschlagen."
             if ok {
                 pickedURL = nil
                 name = ""
-                transcript = ""
             }
         }
     }
