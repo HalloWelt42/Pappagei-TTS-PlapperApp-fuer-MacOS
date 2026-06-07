@@ -14,11 +14,22 @@ final class SidecarProcess {
 
     init() {
         let fm = FileManager.default
-        // The built .app sits at the repo root next to backend/, so resolve relative
-        // to the bundle first (works from any clone location); fall back to ~/pappagei.
+        func hasVenv(_ url: URL) -> Bool {
+            fm.fileExists(atPath: url.appending(path: ".venv/bin/python").path)
+        }
+        // 1) absolute path baked in at build time (survives app translocation and any
+        //    clone location); 2) sibling of the .app; 3) ~/pappagei fallback.
+        let baked = (Bundle.main.object(forInfoDictionaryKey: "PGBackendPath") as? String)
+            .map { URL(fileURLWithPath: $0) }
         let sibling = Bundle.main.bundleURL.deletingLastPathComponent().appending(path: "backend")
         let home = fm.homeDirectoryForCurrentUser.appending(path: "pappagei/backend")
-        backendDir = fm.fileExists(atPath: sibling.appending(path: ".venv/bin/python").path) ? sibling : home
+        if let baked, hasVenv(baked) {
+            backendDir = baked
+        } else if hasVenv(sibling) {
+            backendDir = sibling
+        } else {
+            backendDir = home
+        }
         python = backendDir.appending(path: ".venv/bin/python")
         logURL = backendDir.appending(path: "sidecar.log")
     }
@@ -26,6 +37,8 @@ final class SidecarProcess {
     var isInstalled: Bool {
         FileManager.default.fileExists(atPath: python.path)
     }
+
+    var backendPath: String { backendDir.path }
 
     func start() {
         guard isInstalled, process == nil else { return }

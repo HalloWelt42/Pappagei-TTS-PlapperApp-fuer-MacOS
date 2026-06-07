@@ -48,11 +48,11 @@ final class SpeechController: ObservableObject {
     // MARK: lifecycle
 
     func onLaunch() {
-        AppLog.log("onLaunch; trusted=\(AccessibilityPermission.isTrusted)")
+        AppLog.log("onLaunch; trusted=\(AccessibilityPermission.isTrusted); backend=\(sidecar.backendPath); installed=\(sidecar.isInstalled)")
         ActiveAppTracker.shared.start()
         guard sidecar.isInstalled else {
             status = .error("Backend fehlt")
-            statusText = "Backend nicht gefunden unter ~/pappagei/backend"
+            statusText = "Backend nicht gefunden: \(sidecar.backendPath)"
             return
         }
         sidecar.start()
