@@ -177,7 +177,10 @@ struct MenuBarView: View {
 
     private var footer: some View {
         HStack {
-            Text("Hotkey: Ctrl+Shift+R").font(.caption2).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Ctrl+Shift+R vorlesen/stoppen").font(.caption2).foregroundStyle(.secondary)
+                Text("Ctrl+Shift+P Pause").font(.caption2).foregroundStyle(.secondary)
+            }
             Spacer()
             Button("Beenden") { c.quit() }
         }

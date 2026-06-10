@@ -57,18 +57,35 @@ class Engine:
     repetition_penalty: float = 1.1
     _model: object = field(default=None, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _loading: bool = field(default=False, repr=False)
+    _loading_key: Optional[str] = field(default=None, repr=False)
 
     @property
     def loaded(self) -> bool:
         return self._model is not None
 
+    @property
+    def loading(self) -> bool:
+        """True while load() runs; read from other threads for /health."""
+        return self._loading
+
+    @property
+    def loading_model_key(self) -> Optional[str]:
+        return self._loading_key
+
     def load(self, model_key: Optional[str] = None) -> None:
         key = model_key or self.model_key
         if key not in MODELS:
             raise ValueError(f"unknown model {key!r}; choose from {list(MODELS)}")
-        with self._lock:
-            self._model = load_model(MODELS[key])
-            self.model_key = key
+        self._loading = True
+        self._loading_key = key
+        try:
+            with self._lock:
+                self._model = load_model(MODELS[key])
+                self.model_key = key
+        finally:
+            self._loading = False
+            self._loading_key = None
 
     def ensure_loaded(self) -> None:
         if self._model is None:
