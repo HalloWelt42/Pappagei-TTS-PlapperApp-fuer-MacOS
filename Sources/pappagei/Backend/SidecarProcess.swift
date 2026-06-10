@@ -17,19 +17,22 @@ final class SidecarProcess {
         func hasVenv(_ url: URL) -> Bool {
             fm.fileExists(atPath: url.appending(path: ".venv/bin/python").path)
         }
+        func hasSources(_ url: URL) -> Bool {
+            fm.fileExists(atPath: url.appending(path: "server.py").path)
+        }
         // 1) absolute path baked in at build time (survives app translocation and any
         //    clone location); 2) sibling of the .app; 3) ~/pappagei fallback.
         let baked = (Bundle.main.object(forInfoDictionaryKey: "PGBackendPath") as? String)
             .map { URL(fileURLWithPath: $0) }
         let sibling = Bundle.main.bundleURL.deletingLastPathComponent().appending(path: "backend")
         let home = fm.homeDirectoryForCurrentUser.appending(path: "pappagei/backend")
-        if let baked, hasVenv(baked) {
-            backendDir = baked
-        } else if hasVenv(sibling) {
-            backendDir = sibling
-        } else {
-            backendDir = home
-        }
+        let candidates = [baked, sibling, home].compactMap { $0 }
+        // Prefer a candidate with a working venv; failing that, one that at
+        // least has the sources (broken venv -> repair hint with the right
+        // path, instead of drifting off to the fallback).
+        backendDir = candidates.first(where: hasVenv)
+            ?? candidates.first(where: hasSources)
+            ?? home
         python = backendDir.appending(path: ".venv/bin/python")
         logURL = backendDir.appending(path: "sidecar.log")
     }
@@ -37,6 +40,14 @@ final class SidecarProcess {
     var isInstalled: Bool {
         FileManager.default.fileExists(atPath: python.path)
     }
+
+    /// The backend sources exist even though the venv may be broken; used to
+    /// tell "repo not found" apart from "venv needs repair".
+    var sourcesPresent: Bool {
+        FileManager.default.fileExists(atPath: backendDir.appending(path: "server.py").path)
+    }
+
+    var isRunning: Bool { process?.isRunning ?? false }
 
     var backendPath: String { backendDir.path }
 
@@ -59,6 +70,13 @@ final class SidecarProcess {
             p.standardOutput = log
             p.standardError = log
         }
+        p.terminationHandler = { [weak self] proc in
+            DispatchQueue.main.async {
+                guard let self, self.process === proc else { return }
+                self.process = nil      // health watchdog sees isRunning == false
+                AppLog.log("sidecar exited unexpectedly (status \(proc.terminationStatus))")
+            }
+        }
         do {
             try p.run()
             process = p
@@ -68,7 +86,13 @@ final class SidecarProcess {
     }
 
     func stop() {
-        process?.terminate()
-        process = nil
+        guard let p = process else { return }
+        p.terminationHandler = nil      // intentional shutdown: no exit callback
+        process = nil                   // start() may run again right away
+        p.terminate()
+        // A hung Metal call can ignore SIGTERM; follow up so the port frees.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            if p.isRunning { kill(p.processIdentifier, SIGKILL) }
+        }
     }
 }

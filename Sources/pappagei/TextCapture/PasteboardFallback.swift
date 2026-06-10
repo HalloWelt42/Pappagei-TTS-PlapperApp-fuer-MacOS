@@ -8,6 +8,9 @@ enum PasteboardFallback {
     private static let keyC: CGKeyCode = 0x08
 
     static func grab() -> String? {
+        // Mute the clipboard watcher for the whole grab-and-restore dance,
+        // so neither the grabbed selection nor the restore is auto-read.
+        ClipboardWatchGuard.suppress(for: 1.5)
         let pasteboard = NSPasteboard.general
         let previous = pasteboard.string(forType: .string)
         let before = pasteboard.changeCount
@@ -31,9 +34,12 @@ enum PasteboardFallback {
 
         if captured != nil, let previous {
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) {
+                ClipboardWatchGuard.suppress(for: 1.5)
                 let pb = NSPasteboard.general
                 pb.clearContents()
                 pb.setString(previous, forType: .string)
+                // Mark the restore as transient so clipboard tools ignore it too.
+                pb.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
             }
         }
         return captured

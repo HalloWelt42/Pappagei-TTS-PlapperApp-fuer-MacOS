@@ -4,6 +4,8 @@ struct Health: Codable {
     let status: String
     let model: String
     let loaded: Bool
+    let loading: Bool?          // true while a model is being loaded/downloaded
+    let download_bytes: Int?    // HF cache size for that model, grows during download
     let sample_rate: Int
 }
 
@@ -50,8 +52,10 @@ final class TTSClient: NSObject, URLSessionDataDelegate {
 
     struct ServerError: Error { let message: String }
 
-    func health() async -> Health? {
-        guard let data = try? await get("health") else { return nil }
+    func health(timeout: TimeInterval = 60) async -> Health? {
+        var req = URLRequest(url: base.appending(path: "health"))
+        req.timeoutInterval = timeout
+        guard let (data, _) = try? await URLSession.shared.data(for: req) else { return nil }
         return try? JSONDecoder().decode(Health.self, from: data)
     }
 
@@ -74,6 +78,20 @@ final class TTSClient: NSObject, URLSessionDataDelegate {
     func deleteVoice(id: String) async -> Bool {
         var req = URLRequest(url: base.appending(path: "voices/\(id)"))
         req.httpMethod = "DELETE"
+        guard let (_, resp) = try? await URLSession.shared.data(for: req) else { return false }
+        return (resp as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    /// Ask the sidecar to load `key` now (instead of lazily on the next read).
+    /// Generous timeout: a first-time switch downloads the model.
+    func switchModel(_ key: String) async -> Bool {
+        var comps = URLComponents(url: base.appending(path: "model/switch"),
+                                  resolvingAgainstBaseURL: false)!
+        comps.queryItems = [URLQueryItem(name: "model", value: key)]
+        guard let url = comps.url else { return false }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 1800
         guard let (_, resp) = try? await URLSession.shared.data(for: req) else { return false }
         return (resp as? HTTPURLResponse)?.statusCode == 200
     }

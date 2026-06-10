@@ -12,10 +12,14 @@ natural backpressure). Endpoints are async so the event loop stays responsive.
 from __future__ import annotations
 
 import asyncio
+import os
 import queue
+import signal
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 import uvicorn
@@ -34,6 +38,22 @@ _QUEUE_MAX = 32          # bounded -> backpressure when the client lags
 _PUT_TIMEOUT = 0.5       # seconds; lets the producer notice cancellation
 _DONE = object()         # stream sentinel
 
+_PARENT_PID = os.getppid()
+
+
+def _watch_parent() -> None:
+    """Exit when the parent process (the app) dies.
+
+    The app launches uvicorn directly, so our parent is the app; once it is
+    gone we get reparented (ppid changes) and must not linger on port 8765.
+    Started manually from a shell, the parent is that shell -- same deal.
+    """
+    while os.getppid() == _PARENT_PID:
+        time.sleep(2.0)
+    os.kill(os.getpid(), signal.SIGTERM)   # let uvicorn shut down cleanly
+    time.sleep(5.0)
+    os._exit(0)                            # emergency stop if a stream hangs
+
 
 async def _run_infer(fn, *args):
     """Run a model operation on the single inference thread and await it."""
@@ -51,6 +71,7 @@ def _load_and_warm() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    threading.Thread(target=_watch_parent, daemon=True, name="parent-watchdog").start()
     infer_pool.submit(_load_and_warm)   # warm in the background; /health reports readiness
     yield
     infer_pool.shutdown(wait=False)
@@ -75,12 +96,31 @@ class ImportRequest(BaseModel):
     speaker: Optional[str] = None
 
 
+def _model_cache_bytes(model_key: Optional[str]) -> Optional[int]:
+    """Bytes of the model's HF cache dir; grows while a download runs."""
+    if not model_key or model_key not in MODELS:
+        return None
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+        repo_dir = Path(HF_HUB_CACHE) / ("models--" + MODELS[model_key].replace("/", "--"))
+        if not repo_dir.exists():
+            return 0
+        # Skip symlinks: snapshot links would double-count the blobs.
+        return sum(p.stat().st_size for p in repo_dir.rglob("*")
+                   if p.is_file() and not p.is_symlink())
+    except Exception:  # noqa: BLE001 -- progress display is best-effort
+        return None
+
+
 @app.get("/health")
 def health() -> dict:
+    loading = engine.loading
     return {
         "status": "ok",
         "model": engine.model_key,
         "loaded": engine.loaded,
+        "loading": loading,
+        "download_bytes": _model_cache_bytes(engine.loading_model_key) if loading else None,
         "sample_rate": engine.sample_rate,
     }
 
@@ -131,8 +171,13 @@ def _resolve_voice(req: SynthRequest) -> Voice:
 async def synthesize(req: SynthRequest) -> StreamingResponse:
     if not req.text.strip():
         raise HTTPException(status_code=400, detail="empty text")
-    voice = _resolve_voice(req)
     model = req.model
+    if model is not None and model not in MODELS:
+        # Reject an unknown model up front instead of raising mid-stream, which
+        # would otherwise reach the client as an empty 200 (no audio, no error).
+        raise HTTPException(status_code=400,
+                            detail=f"unknown model {model!r}; choose {list(MODELS)}")
+    voice = _resolve_voice(req)
     pcm_queue: "queue.Queue" = queue.Queue(maxsize=_QUEUE_MAX)
     cancel = threading.Event()
 

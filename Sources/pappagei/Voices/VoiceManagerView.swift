@@ -25,6 +25,13 @@ struct VoiceManagerView: View {
                             Image(systemName: c.selectedVoice == voice.id ? "checkmark.circle.fill" : "person.wave.2")
                             Text(voice.name)
                             Spacer()
+                            Button {
+                                c.speak(text: SpeechController.previewText, voice: voice.id)
+                            } label: {
+                                Image(systemName: "play.circle")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Hörprobe mit dieser Stimme")
                             Button("Wählen") { c.selectedVoice = voice.id; c.save() }
                                 .buttonStyle(.link)
                             Button(role: .destructive) {
@@ -59,7 +66,7 @@ struct VoiceManagerView: View {
             }
 
             Button {
-                c.speak(text: "Hallo, dies ist eine Hörprobe von pappagei.")
+                c.speak(text: SpeechController.previewText)
             } label: {
                 Label("Hörprobe der gewählten Stimme", systemImage: "play.circle")
             }

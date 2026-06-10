@@ -5,6 +5,7 @@ import Carbon.HIToolbox
 /// global shortcuts). Does not require Accessibility permission.
 final class GlobalHotKey {
     static let keyR = UInt32(kVK_ANSI_R)
+    static let keyP = UInt32(kVK_ANSI_P)
     // Distinct modifier bits, so addition equals bitwise-or (avoids the pipe character).
     static let controlShift = UInt32(controlKey) + UInt32(shiftKey)
 
