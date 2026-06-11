@@ -23,6 +23,11 @@ struct VoicesResponse: Codable {
     let custom: [CustomVoice]
 }
 
+struct SpeakCommand: Codable {
+    let action: String      // "speak", "stop" or "none" (poll timeout)
+    let text: String?
+}
+
 private struct SynthBody: Encodable {
     let text: String
     let voice: String?
@@ -80,6 +85,15 @@ final class TTSClient: NSObject, URLSessionDataDelegate {
         req.httpMethod = "DELETE"
         guard let (_, resp) = try? await URLSession.shared.data(for: req) else { return false }
         return (resp as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    /// Long-poll the speak bridge (browser extension and other local tools
+    /// drop their read requests there). Returns nil when the backend is away.
+    func nextSpeakCommand() async -> SpeakCommand? {
+        var req = URLRequest(url: base.appending(path: "speak/next"))
+        req.timeoutInterval = 35        // server side holds for up to 25 s
+        guard let (data, _) = try? await URLSession.shared.data(for: req) else { return nil }
+        return try? JSONDecoder().decode(SpeakCommand.self, from: data)
     }
 
     /// Ask the sidecar to load `key` now (instead of lazily on the next read).

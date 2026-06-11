@@ -31,6 +31,7 @@ final class SpeechController: ObservableObject {
     private var pauseHotKey: GlobalHotKey?
     private var speakTask: Task<Void, Never>?
     private var healthWatchTask: Task<Void, Never>?
+    private var speakBridgeTask: Task<Void, Never>?
 
     private static let healthFailureLimit = 6     // x 5 s interval = ~30 s outage
     private static let backendRestartLimit = 3
@@ -97,6 +98,35 @@ final class SpeechController: ObservableObject {
             // Always watch from here on -- even if the sidecar died during
             // startup, the watchdog owns restarting and the defect verdict.
             startHealthWatchdog()
+            startSpeakBridge()
+        }
+    }
+
+    /// Receive read requests handed to the sidecar by the browser extension
+    /// (or any local tool) and run them through the normal speak pipeline.
+    private func startSpeakBridge() {
+        speakBridgeTask?.cancel()
+        speakBridgeTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                guard let cmd = await self.client.nextSpeakCommand() else {
+                    // Backend away (restarting); ease off and try again.
+                    try? await Task.sleep(for: .seconds(2))
+                    continue
+                }
+                switch cmd.action {
+                case "speak":
+                    guard let text = cmd.text, !text.isEmpty else { break }
+                    if [Status.starting, .downloadingOrLoading].contains(self.status) { break }
+                    AppLog.log("speak bridge -> read \(text.count) chars")
+                    self.speak(text: text)
+                case "stop":
+                    AppLog.log("speak bridge -> stop")
+                    self.stop()
+                default:
+                    break       // "none": poll timeout, just loop
+                }
+            }
         }
     }
 
@@ -113,6 +143,7 @@ final class SpeechController: ObservableObject {
     }
 
     func shutdown() {
+        speakBridgeTask?.cancel()
         healthWatchTask?.cancel()
         speakTask?.cancel()
         audio.stop()

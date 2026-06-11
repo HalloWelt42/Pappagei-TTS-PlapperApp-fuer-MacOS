@@ -1,0 +1,580 @@
+openapi: 3.1.0
+info:
+  title: pappagei TTS API
+  description: "Lokale Schnittstelle der pappagei-App: Text-zu-Sprache mit Qwen3-TTS auf\nApple Silicon,\
+    \ inklusive Voice-Cloning aus Referenz-Audio.\n\n- Erreichbar nur auf diesem Rechner (`127.0.0.1:8765`),\
+    \ keine Anmeldung.\n- `/synthesize` liefert Audio als Rohdaten-Stream (PCM, siehe dort).\n- Die Vorlese-Brücke\
+    \ (`/speak`) nimmt Text von lokalen Werkzeugen wie der\n  Browser-Erweiterung an; gesprochen wird\
+    \ in der App selbst.\n\nInteraktive Oberfläche: [/docs](/docs) - maschinenlesbar: [/openapi.json](/openapi.json),\n\
+    im Repo als `docs/api.yaml`.\n"
+  version: 0.3.1
+paths:
+  /health:
+    get:
+      tags:
+      - Status
+      summary: Zustand des Dienstes
+      description: 'Antwortet sofort, auch während Synthese oder Modell-Download.
+
+
+        Während eines Modell-Ladevorgangs ist `loading` true und `download_bytes`
+
+        zeigt die bereits im Cache liegende Datenmenge (wächst bei laufendem
+
+        Download zwischen zwei Abfragen).'
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /warmup:
+    post:
+      tags:
+      - Status
+      summary: Modell laden und aufwärmen
+      description: 'Lädt das aktive Modell (falls nötig) und spricht einen kurzen Probelauf.
+
+
+        Blockiert, bis das Modell bereit ist - beim allerersten Aufruf inklusive
+
+        Download. Danach starten Synthesen ohne Anlaufzeit.'
+      operationId: warmup_warmup_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarmupResponse'
+  /voices:
+    get:
+      tags:
+      - Stimmen
+      summary: Sprecher und eigene Stimmen auflisten
+      description: 'Eingebaute Sprecher plus alle importierten (geklonten) Stimmen.
+
+
+        Beide Arten lassen sich in `/synthesize` als `voice` verwenden:
+
+        Sprecher über ihren Namen, eigene Stimmen über `id` oder `name`.'
+      operationId: list_voices_voices_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoicesListResponse'
+  /voices/import:
+    post:
+      tags:
+      - Stimmen
+      summary: Eigene Stimme aus einer Aufnahme anlegen
+      description: 'Klont eine Stimme aus einer Referenz-Aufnahme (WAV oder mp3).
+
+
+        Die Aufnahme wird kopiert und dauerhaft hinterlegt; ein Transkript ist
+
+        nicht nötig (das Base-Modell klont über den Sprecher-Encoder direkt aus
+
+        dem Audio). Empfohlen: 5 bis 10 Sekunden, klar gesprochen, ein Sprecher.'
+      operationId: import_voice_voices_import_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceInfo'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /voices/{vid}:
+    delete:
+      tags:
+      - Stimmen
+      summary: Eigene Stimme löschen
+      description: Entfernt die Stimme samt hinterlegter Referenz-Aufnahme.
+      operationId: delete_voice_voices__vid__delete
+      parameters:
+      - name: vid
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Vid
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteVoiceResponse'
+        '404':
+          description: Keine Stimme mit dieser Id.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /model/switch:
+    post:
+      tags:
+      - Modelle
+      summary: TTS-Modell wechseln
+      description: 'Lädt das angegebene Modell und macht es zum aktiven Modell.
+
+
+        Blockiert, bis das Modell bereit ist; beim ersten Wechsel auf ein noch
+
+        nicht heruntergeladenes Modell entsprechend lange (Fortschritt über
+
+        `GET /health` beobachtbar).'
+      operationId: switch_model_model_switch_post
+      parameters:
+      - name: model
+        in: query
+        required: true
+        schema:
+          type: string
+          description: 'Ziel-Modell: ''0.6b'' (schnell) oder ''1.7b'' (höhere Qualität).'
+          title: Model
+        description: 'Ziel-Modell: ''0.6b'' (schnell) oder ''1.7b'' (höhere Qualität).'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelSwitchResponse'
+        '400':
+          description: Unbekannter Modell-Schlüssel.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /speak:
+    post:
+      tags:
+      - Vorlese-Brücke
+      summary: Text zum Vorlesen übergeben
+      description: 'Reicht Text an die App weiter, die ihn vorliest.
+
+
+        Gesprochen wird mit der in der App gewählten Stimme und deren Tempo,
+
+        satzweise gestreamt. Der neueste Auftrag gewinnt: ein weiterer Aufruf
+
+        ersetzt einen noch nicht abgeholten und unterbricht laufende Wiedergabe.'
+      operationId: speak_speak_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpeakRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueuedResponse'
+        '400':
+          description: Leerer Text.
+        '413':
+          description: Text länger als das Limit (50000 Zeichen).
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /speak/stop:
+    post:
+      tags:
+      - Vorlese-Brücke
+      summary: Wiedergabe stoppen
+      description: Verwirft wartende Aufträge und stoppt die laufende Wiedergabe der App.
+      operationId: speak_stop_speak_stop_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueuedResponse'
+  /speak/next:
+    get:
+      tags:
+      - Vorlese-Brücke
+      summary: Nächstes Kommando abholen (Long-Poll, intern)
+      description: 'Long-Poll-Gegenstück für die App; Werkzeuge brauchen es nicht.
+
+
+        Hängt, bis ein Kommando eintrifft oder das Zeitfenster abläuft
+
+        (`action: none`). Die App ruft den Endpunkt in einer Endlosschleife.'
+      operationId: speak_next_speak_next_get
+      parameters:
+      - name: timeout
+        in: query
+        required: false
+        schema:
+          type: number
+          maximum: 60.0
+          minimum: 0.0
+          description: Wartezeit in Sekunden, bevor 'none' zurückkommt.
+          default: 25.0
+          title: Timeout
+        description: Wartezeit in Sekunden, bevor 'none' zurückkommt.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpeakCommandResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /synthesize:
+    post:
+      tags:
+      - Synthese
+      summary: Text in Audio umwandeln (PCM-Stream)
+      description: 'Synthetisiert den Text und streamt das Audio noch während der Erzeugung.
+
+
+        Wiedergabe-Beispiel (Stream nach WAV wandeln):
+
+        `curl -s -X POST -H ''Content-Type: application/json'' -d ''{"text":"Hallo."}''
+
+        http://127.0.0.1:8765/synthesize | ffmpeg -f s16le -ar 24000 -ac 1 -i - hallo.wav`'
+      operationId: synthesize_synthesize_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SynthRequest'
+        required: true
+      responses:
+        '200':
+          description: 'Roh-Audio als Stream: PCM, 16 Bit signed little-endian, mono, Abtastrate laut
+            `GET /health` (Standard 24000 Hz). Die Daten beginnen, sobald das Modell erste Stücke liefert.'
+          content:
+            application/json:
+              schema: {}
+            audio/L16; rate=24000; channels=1: {}
+        '400':
+          description: Leerer Text oder unbekannter Modell-Schlüssel.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    DeleteVoiceResponse:
+      properties:
+        deleted:
+          type: string
+          title: Deleted
+          description: Id der entfernten Stimme.
+      type: object
+      required:
+      - deleted
+      title: DeleteVoiceResponse
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HealthResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+          description: '''ok'', sobald der Dienst antwortet.'
+        model:
+          type: string
+          title: Model
+          description: Aktiver Modell-Schlüssel ('0.6b' oder '1.7b').
+        loaded:
+          type: boolean
+          title: Loaded
+          description: True, wenn das Modell geladen und sprechbereit ist.
+        loading:
+          type: boolean
+          title: Loading
+          description: True, während ein Modell lädt oder herunterlädt.
+        download_bytes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Download Bytes
+          description: Größe des Modell-Caches in Bytes, nur während des Ladens; wächst bei laufendem
+            Download.
+        sample_rate:
+          type: integer
+          title: Sample Rate
+          description: Abtastrate des Audio-Streams in Hz.
+      type: object
+      required:
+      - status
+      - model
+      - loaded
+      - loading
+      - download_bytes
+      - sample_rate
+      title: HealthResponse
+    ImportRequest:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Anzeigename der neuen Stimme.
+        audio_path:
+          type: string
+          title: Audio Path
+          description: Absoluter Pfad zur Referenz-Aufnahme (WAV oder mp3, etwa 5 bis 10 Sekunden, ein
+            Sprecher).
+        transcript:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Transcript
+          description: Optionales Transkript der Aufnahme; für das Cloning nicht erforderlich.
+        speaker:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Speaker
+          description: Eingebauter Basis-Sprecher als Rückfallebene.
+      type: object
+      required:
+      - name
+      - audio_path
+      title: ImportRequest
+    ModelSwitchResponse:
+      properties:
+        model:
+          type: string
+          title: Model
+          description: Nach dem Wechsel aktiver Modell-Schlüssel.
+      type: object
+      required:
+      - model
+      title: ModelSwitchResponse
+    QueuedResponse:
+      properties:
+        queued:
+          type: boolean
+          title: Queued
+          description: 'True: das Kommando liegt für die App bereit.'
+      type: object
+      required:
+      - queued
+      title: QueuedResponse
+    SpeakCommandResponse:
+      properties:
+        action:
+          type: string
+          title: Action
+          description: '''speak'' (Text vorlesen), ''stop'' (Wiedergabe stoppen) oder ''none'' (Zeitfenster
+            ohne Kommando abgelaufen).'
+        text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Text
+          description: Der Text bei action='speak'.
+      type: object
+      required:
+      - action
+      title: SpeakCommandResponse
+    SpeakRequest:
+      properties:
+        text:
+          type: string
+          title: Text
+          description: Der Text, den die App vorlesen soll.
+          example: Diesen Absatz bitte vorlesen.
+      type: object
+      required:
+      - text
+      title: SpeakRequest
+    SynthRequest:
+      properties:
+        text:
+          type: string
+          title: Text
+          description: Der zu sprechende Text.
+          example: Hallo, das ist ein Test.
+        voice:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Voice
+          description: Id oder Name einer eigenen Stimme, oder ein eingebauter Sprecher (siehe GET /voices).
+            Ohne Angabe spricht der Standard-Sprecher.
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+          description: Modell-Schlüssel '0.6b' oder '1.7b'; ohne Angabe bleibt das aktuell geladene Modell
+            aktiv.
+        speed:
+          type: number
+          title: Speed
+          description: Modellseitiger Tempo-Faktor; wirkt praktisch kaum. Die App regelt das Tempo über
+            die Audio-Wiedergabe.
+          default: 1.0
+        temperature:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Temperature
+          description: Sampling-Temperatur (etwa 0.3 bis 1.0).
+        repetition_penalty:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Repetition Penalty
+          description: Wiederholungs-Strafe (etwa 1.0 bis 1.3).
+      type: object
+      required:
+      - text
+      title: SynthRequest
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    VoiceInfo:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Kurze Id der Stimme (für 'voice' in /synthesize).
+        name:
+          type: string
+          title: Name
+          description: Anzeigename.
+        ref_audio:
+          type: string
+          title: Ref Audio
+          description: Lokaler Pfad der hinterlegten Referenz-Aufnahme.
+        ref_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Ref Text
+          description: Hinterlegtes Transkript, falls vorhanden.
+        speaker:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Speaker
+          description: Basis-Sprecher als Rückfallebene.
+      type: object
+      required:
+      - id
+      - name
+      - ref_audio
+      title: VoiceInfo
+    VoicesListResponse:
+      properties:
+        model:
+          type: string
+          title: Model
+          description: Aktiver Modell-Schlüssel.
+        speakers:
+          items:
+            type: string
+          type: array
+          title: Speakers
+          description: Eingebaute Sprecher.
+        custom:
+          items:
+            $ref: '#/components/schemas/VoiceInfo'
+          type: array
+          title: Custom
+          description: Eigene, geklonte Stimmen.
+      type: object
+      required:
+      - model
+      - speakers
+      - custom
+      title: VoicesListResponse
+    WarmupResponse:
+      properties:
+        warmup_seconds:
+          type: number
+          title: Warmup Seconds
+          description: Dauer des Aufwärm-Laufs in Sekunden.
+        sample_rate:
+          type: integer
+          title: Sample Rate
+          description: Abtastrate des Audio-Streams in Hz.
+      type: object
+      required:
+      - warmup_seconds
+      - sample_rate
+      title: WarmupResponse
+tags:
+- name: Status
+  description: Zustand des Dienstes und des geladenen Modells.
+- name: Stimmen
+  description: Eingebaute Sprecher und eigene, geklonte Stimmen.
+- name: Modelle
+  description: Zwischen den TTS-Modellen wechseln.
+- name: Synthese
+  description: Text in Audio umwandeln (Streaming).
+- name: Vorlese-Brücke
+  description: Text zum Vorlesen an die App übergeben (genutzt von der Browser-Erweiterung).
