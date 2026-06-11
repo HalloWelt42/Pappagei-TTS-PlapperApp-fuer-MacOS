@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "pappagei Vorlesen",
+  "version": "0.3.0",
+  "description": "Vorlese-Knöpfe für Webseiten: schickt Text an die lokale pappagei-App, die ihn mit deiner Stimme vorliest.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["contextMenus", "storage"],
+  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "pappagei"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

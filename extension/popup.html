@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {
+    font-family: "Chakra Petch";
+    src: url("fonts/chakra-petch-latin-400-normal.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: "Chakra Petch";
+    src: url("fonts/chakra-petch-latin-700-normal.woff2") format("woff2");
+    font-weight: 700;
+    font-style: normal;
+  }
+  :root { color-scheme: light dark; }
+  body {
+    font-family: "Chakra Petch", system-ui, sans-serif;
+    width: 270px;
+    margin: 0;
+    padding: 12px 14px 14px;
+    font-size: 13px;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .head img { width: 22px; height: 22px; }
+  .head strong { font-size: 15px; font-weight: 700; }
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 12px;
+  }
+  #dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #8b949e;
+    flex: none;
+  }
+  #dot.ok { background: #2da44e; }
+  #dot.warn { background: #d4a72c; }
+  #dot.err { background: #cf222e; }
+  button {
+    font: inherit;
+    width: 100%;
+    padding: 7px 0;
+    border: none;
+    border-radius: 7px;
+    background: #1f6feb;
+    color: #fff;
+    cursor: pointer;
+    margin-bottom: 12px;
+  }
+  button:hover { background: #388bfd; }
+  button:disabled { opacity: .5; cursor: default; }
+  label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+  }
+  .hint {
+    margin-top: 10px;
+    font-size: 11px;
+    opacity: .65;
+    line-height: 1.45;
+  }
+</style>
+</head>
+<body>
+  <div class="head">
+    <img src="icons/icon32.png" alt="">
+    <strong>pappagei</strong>
+  </div>
+  <div class="status">
+    <span id="dot"></span>
+    <span id="statusText">prüfe Verbindung ...</span>
+  </div>
+  <button id="stop">Wiedergabe stoppen</button>
+  <label>
+    <input type="checkbox" id="hoverButtons">
+    Vorlese-Knöpfe auf Seiten anzeigen
+  </label>
+  <div class="hint">
+    Knopf am Absatz liest den Abschnitt, Shift-Klick ab dort bis zum Ende.
+    Markierter Text bekommt einen eigenen Knopf, auch im Kontextmenü.
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

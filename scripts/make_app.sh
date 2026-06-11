@@ -7,7 +7,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 config="${1:-debug}"
 
-VERSION="0.2.0"
+VERSION="0.3.1"
 BUILD="$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 1)"
 
 swift build -c "$config"

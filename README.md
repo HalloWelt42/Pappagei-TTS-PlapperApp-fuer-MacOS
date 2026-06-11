@@ -51,11 +51,37 @@ open /Applications/pappagei.app
   verwalten" -> WAV/mp3 (~5-7s, klar gesprochen) importieren; dort gibt es je
   Stimme eine Hörprobe.
 
+## Browser-Erweiterung
+
+Vorlese-Knöpfe direkt auf Webseiten: `extension/` enthält eine Erweiterung
+für Chromium-basierte Browser, die Text an die laufende pappagei-App schickt.
+
+Einrichten (einmalig):
+
+1. Erweiterungs-Seite des Browsers öffnen (`chrome://extensions` bzw.
+   `brave://extensions`) und den **Entwicklermodus** einschalten.
+2. **"Entpackte Erweiterung laden"** wählen und den Ordner `extension/`
+   dieses Repos auswählen.
+
+Benutzen (pappagei.app muss laufen):
+
+- Beim Überfahren eines Textabschnitts erscheint ein Vorlese-Knopf:
+  Klick liest den Abschnitt, **Shift-Klick ab dort bis zum Ende**.
+- Markierter Text bekommt einen eigenen Knopf; alternativ Rechtsklick ->
+  "Mit pappagei vorlesen".
+- Das Symbol in der Werkzeugleiste zeigt den Verbindungs-Status, stoppt die
+  Wiedergabe und schaltet die Seiten-Knöpfe ein und aus.
+
+Gesprochen wird in der App - Stimme, Tempo, Pause/Stopp und Hotkeys wie
+gewohnt; die Erweiterung übergibt nur den Text an die lokale Schnittstelle
+(`127.0.0.1:8765/speak`, erreichbar nur auf diesem Rechner).
+
 ## Aufbau
 
 - `backend/` - Python-TTS-Sidecar (FastAPI + mlx-audio, Qwen3-TTS Base, Cloning per Sprecher-Encoder):
   `tts_engine.py`, `voices.py`, `server.py`, `requirements.txt`, `selftest.py`.
 - `Sources/pappagei/` - native Swift-Menüleisten-App (SwiftPM-Paket).
+- `extension/` - Browser-Erweiterung (Vorlese-Knöpfe, Brücke zur App).
 - `scripts/` - `make_app.sh` (App bauen + nach /Applications installieren), `run_backend.sh`, `make_icon.swift`.
 - `install.sh` - Einrichtung in einem Schritt.
 
@@ -75,6 +101,9 @@ open /Applications/pappagei.app
   wirkt praktisch nicht).
 - Referenz-Audio: WAV und mp3 (mp3 via ffmpeg/miniaudio).
 - Selbsttest:  `(cd backend && .venv/bin/python selftest.py)` -> schreibt `selftest.wav`.
+- **API:** vollständige Referenz in [docs/API.md](docs/API.md), Spezifikation in
+  [docs/api.yaml](docs/api.yaml); interaktiv unter `http://127.0.0.1:8765/docs`,
+  sobald die App läuft.
 
 ## Hinweise
 

@@ -33,3 +33,6 @@ voices_in/
 .DS_Store
 .AppleDouble
 Icon?
+# 'Icon?' targets Finder custom-icon files but also matches the icons/
+# directory (case-insensitive); keep the extension icons in the repo.
+!extension/icons/
