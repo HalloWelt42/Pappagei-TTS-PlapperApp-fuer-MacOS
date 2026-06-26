@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "pappagei Vorlesen",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Vorlese-Knöpfe für Webseiten: schickt Text an die lokale pappagei-App, die ihn mit deiner Stimme vorliest.",
   "icons": {
     "16": "icons/icon16.png",

@@ -211,4 +211,39 @@
   });
 
   ensureMounted();
+
+  // --- Brücke für Web-Apps (z.B. BuecherFreunde) -----------------------------
+  // Eine Seite kann per window.postMessage Vorlese-Befehle schicken; wir reichen
+  // sie an den Service Worker (und damit an die App) weiter und antworten mit
+  // einer Bestätigung (pappagei-ack). So lassen sich aus einer Web-App heraus
+  // ganze Seiten/Kapitel/Bücher vorlesen und stoppen, ohne CORS.
+  window.addEventListener("message", (e) => {
+    if (e.source !== window) return;
+    const d = e.data;
+    if (!d || d.type !== "pappagei" || !d.action) return;
+    const reply = (ok, extra) =>
+      window.postMessage({ type: "pappagei-ack", id: d.id, ok, ...(extra || {}) }, "*");
+    try {
+      if (d.action === "ping") {
+        chrome.runtime.sendMessage({ type: "health" }, (resp) => {
+          reply(!chrome.runtime.lastError && !!resp && !!resp.ok, { health: resp && resp.health });
+        });
+      } else if (d.action === "stop") {
+        chrome.runtime.sendMessage({ type: "stop" }, (resp) => {
+          reply(!chrome.runtime.lastError && !!resp && !!resp.ok);
+        });
+      } else if (d.action === "speak") {
+        const text = String(d.text || "").trim().slice(0, MAX_TEXT_CHARS);
+        if (!text) {
+          reply(false);
+          return;
+        }
+        chrome.runtime.sendMessage({ type: "speak", text }, (resp) => {
+          reply(!chrome.runtime.lastError && !!resp && !!resp.ok);
+        });
+      }
+    } catch {
+      reply(false);
+    }
+  });
 })();
