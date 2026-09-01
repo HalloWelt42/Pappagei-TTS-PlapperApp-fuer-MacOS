@@ -31,6 +31,8 @@ Das Backend läuft, sobald die App gestartet ist; eigenständig startet es
 | DELETE | `/voices/{vid}` | Eigene Stimme löschen |
 | POST | `/model/switch` | TTS-Modell wechseln |
 | POST | `/synthesize` | Text in Audio umwandeln (Stream) |
+| POST | `/export` | Gesamttext als fertige Audiodatei (WAV oder MP3) |
+| POST | `/title` | Kurzen Titel für den Text erzeugen (optional, per LLM) |
 | POST | `/speak` | Text von der App vorlesen lassen |
 | POST | `/speak/stop` | Wiedergabe der App stoppen |
 | GET | `/speak/next` | Kommando abholen (intern, Long-Poll) |
@@ -165,6 +167,71 @@ die Erzeugung serverseitig kurz darauf.
 
 Hinweis: Es läuft genau eine Synthese gleichzeitig (das Modell ist an einen
 Thread gebunden); parallele Aufrufe werden nacheinander bedient.
+
+## Export
+
+### POST /export
+
+Wandelt den kompletten Text in eine **fertige Audiodatei** um und gibt sie als
+Ganzes zurück (kein Stream, kein Nachbearbeiten nötig). Anders als `/synthesize`
+liefert dieser Endpunkt eine abspiel- und speicherbare Datei mit Kopf.
+
+Body (nur `text` ist Pflicht):
+
+| Feld | Typ | Bedeutung |
+|---|---|---|
+| `text` | string | Der Gesamttext. |
+| `voice` | string | Sprecher-Name oder Id/Name einer eigenen Stimme. |
+| `model` | string | `0.6b` oder `1.7b`; lädt bei Bedarf um. |
+| `format` | string | `mp3` oder `wav`. Ohne Angabe MP3, wenn ffmpeg vorhanden ist, sonst WAV. |
+| `temperature` | number | Sampling-Temperatur (etwa 0.3 bis 1.0). |
+| `repetition_penalty` | number | Wiederholungs-Strafe (etwa 1.0 bis 1.3). |
+
+Die Ausgabe ist in natürlichem Tempo; das Tempo der App ist eine reine
+Wiedergabe-Streckung und wird bewusst nicht in die Datei geschrieben.
+
+MP3 entsteht über ffmpeg. Fehlt ffmpeg trotz `format=mp3`, wird still auf WAV
+zurückgestuft - das tatsächliche Format steht im Antwort-Header.
+
+**Antwort-Header:**
+
+- `Content-Type`: `audio/mpeg` oder `audio/wav`.
+- `X-Audio-Format`: `mp3` oder `wav` (das tatsächlich gelieferte Format).
+- `X-Audio-Duration-Seconds`: Länge in Sekunden.
+- `X-Audio-Sample-Rate`: Abtastrate in Hz.
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/export \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "Ein längerer Text.", "voice": "Chelsie", "format": "mp3"}' \
+  -o gesamttext.mp3
+```
+
+Fehler: `400` bei leerem Text, unbekanntem Format oder Modell-Schlüssel;
+`413` ab 50000 Zeichen.
+
+## Titel
+
+### POST /title
+
+Erzeugt einen kurzen Titel (2 bis 6 Wörter) für den Text - **optional** und
+best-effort. Der Endpunkt fragt einen lokalen, OpenAI-kompatiblen LLM-Dienst
+(Standard `http://127.0.0.1:1234/v1`, per Umgebungsvariable
+`PAPPAGEI_LLM_BASE_URL` einstellbar; das Modell wahlweise fest über
+`PAPPAGEI_LLM_MODEL`, sonst das erste dort geladene).
+
+Ist kein Modell erreichbar oder antwortet es nicht, kommt `title: null` zurück
+(kein Fehler) - die App lässt den Titel dann einfach leer.
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/title \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "Ein Text über Katzen und ihre Gewohnheiten."}'
+```
+
+```json
+{"title": "Katzen und ihre Gewohnheiten", "model": "lokales-modell"}
+```
 
 ## Vorlese-Brücke
 

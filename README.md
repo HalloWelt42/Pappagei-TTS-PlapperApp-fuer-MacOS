@@ -8,7 +8,8 @@ Silicon vorlesen - mit eigener, geklonter Stimme. Engine: Qwen3-TTS via mlx-audi
 - Apple Silicon (M1/M2/M3/...), macOS 14 oder neuer.
 - Command Line Tools (liefern Swift):  `xcode-select --install`
 - Python 3.10+  (z.B. `brew install python`)
-- Optional: `ffmpeg` für mp3-Stimmproben (`brew install ffmpeg`); WAV geht ohne.
+- Optional: `ffmpeg` für MP3 (Import von mp3-Stimmproben und Sichern als MP3;
+  `brew install ffmpeg`); ohne ffmpeg wird als WAV gesichert.
 
 ## Installation (ein Befehl)
 
@@ -50,6 +51,13 @@ open /Applications/pappagei.app
   unter "Erweitert" Temperatur/Wiederholung. Eigene Stimme über "Stimme
   verwalten" -> WAV/mp3 (~5-7s, klar gesprochen) importieren; dort gibt es je
   Stimme eine Hörprobe.
+- **Als Audiodatei sichern:** Nach dem Vorlesen erzeugt das Sichern-Symbol
+  (Pfeil nach unten) neben Pause/Stopp aus dem zuletzt gelesenen Text eine
+  Datei - MP3, wenn ffmpeg vorhanden ist, sonst WAV, immer mit der aktuell
+  gewählten Stimme. Ein Klick erzeugt die Aufnahme, danach zeigt der Mauszeiger
+  auf dem Symbol Titel, Länge, Größe und Format; ein weiterer Klick öffnet den
+  Speichern-Dialog. Der Titel wird - falls ein lokaler LLM-Dienst läuft - kurz
+  aus dem Inhalt zusammengefasst; ohne LLM bleibt er einfach leer.
 
 ## Browser-Erweiterung
 

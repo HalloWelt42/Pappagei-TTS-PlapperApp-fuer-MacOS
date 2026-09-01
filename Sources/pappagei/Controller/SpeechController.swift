@@ -24,6 +24,18 @@ final class SpeechController: ObservableObject {
     @Published var repetitionPenalty: Double = 1.1
     @Published var clipboardMode: Bool = false
 
+    /// The most recent real utterance (clipboard, selection or bridge). This is
+    /// what "save as audio file" exports; voice previews do not touch it.
+    @Published private(set) var lastText: String = ""
+
+    /// Snapshot that fully determines an export of the current text: the text
+    /// plus the voice, model and sampling settings that would be used right now.
+    var exportSource: ExportSource? {
+        lastText.isEmpty ? nil
+            : ExportSource(text: lastText, voice: selectedVoice, model: model,
+                           temperature: temperature, repetitionPenalty: repetitionPenalty)
+    }
+
     private let client = TTSClient()
     private let audio = AudioPlayer()
     private let sidecar = SidecarProcess()
@@ -320,12 +332,14 @@ final class SpeechController: ObservableObject {
     }
 
     /// Speak with an explicit voice (used by per-voice previews); the selection
-    /// in the menu stays untouched.
-    func speak(text: String, voice: String) {
+    /// in the menu stays untouched. Previews pass `isPreview: true` so the short
+    /// sample text does not become the export source.
+    func speak(text: String, voice: String, isPreview: Bool = false) {
         speakTask?.cancel()
         speakTask = Task { [weak self] in
             guard let self else { return }
-            await self.run(text: text, voice: voice, model: self.model, speed: self.speed)
+            await self.run(text: text, voice: voice, model: self.model, speed: self.speed,
+                           recordAsSource: !isPreview)
         }
     }
 
@@ -376,9 +390,12 @@ final class SpeechController: ObservableObject {
         audio.setRate(speed)
     }
 
-    private func run(text: String, voice: String, model: String, speed: Double) async {
+    private func run(text: String, voice: String, model: String, speed: Double,
+                     recordAsSource: Bool = true) async {
         let sentences = SentenceSegmenter.segments(for: text)
         guard !sentences.isEmpty else { return }
+        // Only real utterances become the export source; previews stay out.
+        if recordAsSource { lastText = text }
         currentSentences = sentences
         playedSentences = 0
         currentVoice = voice

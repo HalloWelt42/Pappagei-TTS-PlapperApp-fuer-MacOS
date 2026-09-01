@@ -44,6 +44,26 @@ private struct ImportBody: Encodable {
     let speaker: String?
 }
 
+private struct ExportBody: Encodable {
+    let text: String
+    let voice: String?
+    let model: String?
+    let format: String?
+    let temperature: Double?
+    let repetition_penalty: Double?
+}
+
+private struct TitleBody: Encodable { let text: String }
+private struct TitleResult: Decodable { let title: String?; let model: String? }
+
+/// A finished audio file plus the metadata the app shows and saves with.
+struct ExportResult {
+    let data: Data
+    let format: String       // "mp3" or "wav" (what the server actually produced)
+    let duration: Double     // seconds
+    let sampleRate: Int
+}
+
 /// Talks to the local sidecar. /synthesize is consumed as a byte stream so audio
 /// starts playing while the rest is still being generated.
 final class TTSClient: NSObject, URLSessionDataDelegate {
@@ -108,6 +128,48 @@ final class TTSClient: NSObject, URLSessionDataDelegate {
         req.timeoutInterval = 1800
         guard let (_, resp) = try? await URLSession.shared.data(for: req) else { return false }
         return (resp as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    /// Render the whole text into a finished audio file (WAV or MP3). Unlike
+    /// `synthesizeStream`, this returns once the complete file is ready. The
+    /// timeout is deliberately generous: long texts take a while, and the whole
+    /// body arrives at the end, so a short idle timeout would abort a valid run.
+    func exportAudio(text: String, voice: String?, model: String?, format: String?,
+                     temperature: Double?, repetitionPenalty: Double?) async throws -> ExportResult {
+        var req = URLRequest(url: base.appending(path: "export"))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 3600
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(
+            ExportBody(text: text, voice: voice, model: model, format: format,
+                       temperature: temperature, repetition_penalty: repetitionPenalty)
+        )
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse else {
+            throw ServerError(message: "keine Antwort vom Dienst")
+        }
+        guard http.statusCode == 200 else {
+            throw ServerError(message: "Dienst meldete Status \(http.statusCode)")
+        }
+        let fmt = http.value(forHTTPHeaderField: "X-Audio-Format") ?? "wav"
+        let duration = Double(http.value(forHTTPHeaderField: "X-Audio-Duration-Seconds") ?? "") ?? 0
+        let rate = Int(http.value(forHTTPHeaderField: "X-Audio-Sample-Rate") ?? "") ?? 24000
+        return ExportResult(data: data, format: fmt, duration: duration, sampleRate: rate)
+    }
+
+    /// Ask for a short title. Best-effort: returns nil when no LLM is available
+    /// or anything goes wrong, so the caller can simply leave the title empty.
+    func generateTitle(text: String) async -> String? {
+        var req = URLRequest(url: base.appending(path: "title"))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 40
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        guard let body = try? JSONEncoder().encode(TitleBody(text: text)) else { return nil }
+        req.httpBody = body
+        guard let (data, _) = try? await URLSession.shared.data(for: req) else { return nil }
+        let title = (try? JSONDecoder().decode(TitleResult.self, from: data))?.title?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (title?.isEmpty ?? true) ? nil : title
     }
 
     /// Stream synthesized PCM. `onChunk` is called as bytes arrive; the call

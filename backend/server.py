@@ -12,11 +12,17 @@ natural backpressure). Endpoints are async so the event loop stays responsive.
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 import os
 import queue
+import shutil
 import signal
+import subprocess
 import threading
 import time
+import urllib.request
+import wave
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,7 +31,7 @@ from typing import Optional
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
-from starlette.responses import StreamingResponse
+from starlette.responses import Response, StreamingResponse
 
 from tts_engine import MODELS, Engine, Voice
 from voices import VoiceStore
@@ -33,6 +39,16 @@ from voices import VoiceStore
 engine = Engine()
 store = VoiceStore()
 infer_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tts-infer")
+
+# Encoding to MP3 needs ffmpeg; without it export falls back to WAV (always
+# available via the standard library). Resolved once at startup.
+FFMPEG = shutil.which("ffmpeg")
+
+# Optional title generation talks to a local, OpenAI-compatible LLM service.
+# Both the endpoint and (optionally) the fixed model are configurable; when no
+# model is loaded there, title generation simply yields an empty title.
+LLM_BASE_URL = os.environ.get("PAPPAGEI_LLM_BASE_URL", "http://127.0.0.1:1234/v1").rstrip("/")
+LLM_MODEL = os.environ.get("PAPPAGEI_LLM_MODEL")  # None -> use the first loaded model
 
 _QUEUE_MAX = 32          # bounded -> backpressure when the client lags
 _PUT_TIMEOUT = 0.5       # seconds; lets the producer notice cancellation
@@ -78,7 +94,7 @@ async def lifespan(_: FastAPI):
 
 
 # Keep in sync with VERSION in scripts/make_app.sh.
-API_VERSION = "0.3.1"
+API_VERSION = "0.4.0"
 
 API_DESCRIPTION = """\
 Lokale Schnittstelle der pappagei-App: Text-zu-Sprache mit Qwen3-TTS auf
@@ -98,6 +114,8 @@ OPENAPI_TAGS = [
     {"name": "Stimmen", "description": "Eingebaute Sprecher und eigene, geklonte Stimmen."},
     {"name": "Modelle", "description": "Zwischen den TTS-Modellen wechseln."},
     {"name": "Synthese", "description": "Text in Audio umwandeln (Streaming)."},
+    {"name": "Export", "description": "Text als fertige Audiodatei erzeugen "
+                                      "(WAV oder MP3) und optional einen Titel dazu."},
     {"name": "Vorlese-Brücke", "description": "Text zum Vorlesen an die App übergeben "
                                               "(genutzt von der Browser-Erweiterung)."},
 ]
@@ -133,6 +151,32 @@ class SynthRequest(BaseModel):
 class SpeakRequest(BaseModel):
     text: str = Field(description="Der Text, den die App vorlesen soll.",
                       json_schema_extra={"example": "Diesen Absatz bitte vorlesen."})
+
+
+class ExportRequest(BaseModel):
+    text: str = Field(description="Der Gesamttext, der als Audiodatei erzeugt werden soll.",
+                      json_schema_extra={"example": "Ein längerer Text, der als Datei gesichert wird."})
+    voice: Optional[str] = Field(default=None,
+                                 description="Id oder Name einer eigenen Stimme, oder ein "
+                                             "eingebauter Sprecher (siehe GET /voices). "
+                                             "Ohne Angabe spricht der Standard-Sprecher.")
+    model: Optional[str] = Field(default=None,
+                                 description="Modell-Schlüssel '0.6b' oder '1.7b'; ohne Angabe "
+                                             "bleibt das aktuell geladene Modell aktiv.")
+    format: Optional[str] = Field(default=None,
+                                  description="'mp3' oder 'wav'. Ohne Angabe MP3, wenn ffmpeg "
+                                              "vorhanden ist, sonst WAV. Fehlt ffmpeg, wird "
+                                              "MP3 automatisch auf WAV zurückgestuft; das "
+                                              "tatsächliche Format steht im Header X-Audio-Format.")
+    temperature: Optional[float] = Field(default=None,
+                                         description="Sampling-Temperatur (etwa 0.3 bis 1.0).")
+    repetition_penalty: Optional[float] = Field(default=None,
+                                                description="Wiederholungs-Strafe (etwa 1.0 bis 1.3).")
+
+
+class TitleRequest(BaseModel):
+    text: str = Field(description="Text, für den ein kurzer Titel erzeugt werden soll.",
+                      json_schema_extra={"example": "Ein Text über Katzen und ihre Gewohnheiten."})
 
 
 class ImportRequest(BaseModel):
@@ -194,6 +238,13 @@ class SpeakCommandResponse(BaseModel):
     action: str = Field(description="'speak' (Text vorlesen), 'stop' (Wiedergabe stoppen) "
                                     "oder 'none' (Zeitfenster ohne Kommando abgelaufen).")
     text: Optional[str] = Field(default=None, description="Der Text bei action='speak'.")
+
+
+class TitleResponse(BaseModel):
+    title: Optional[str] = Field(description="Der erzeugte Titel, oder null, wenn kein LLM "
+                                             "verfügbar ist.")
+    model: Optional[str] = Field(default=None,
+                                 description="Das LLM, das den Titel erzeugt hat, oder null.")
 
 
 def _model_cache_bytes(model_key: Optional[str]) -> Optional[int]:
@@ -364,11 +415,15 @@ async def speak_next(
         return {"action": "none"}
 
 
-def _resolve_voice(req: SynthRequest) -> Voice:
-    voice = store.resolve(req.voice)
-    if voice is None and req.voice and req.voice in engine.supported_speakers():
-        voice = Voice(name=req.voice, speaker=req.voice)
+def _resolve_voice_key(key: Optional[str]) -> Voice:
+    voice = store.resolve(key)
+    if voice is None and key and key in engine.supported_speakers():
+        voice = Voice(name=key, speaker=key)
     return voice or Voice("default")
+
+
+def _resolve_voice(req: SynthRequest) -> Voice:
+    return _resolve_voice_key(req.voice)
 
 
 @app.post("/synthesize", tags=["Synthese"],
@@ -445,6 +500,181 @@ def _safe_put(q: "queue.Queue", item) -> None:
         q.put_nowait(item)
     except queue.Full:
         pass
+
+
+# --- export: text to a finished audio file -----------------------------------
+# Unlike /synthesize (a headerless PCM stream), /export renders the whole text
+# and returns a ready-to-save file: WAV via the standard library, or MP3 when
+# ffmpeg is present. The exported audio is at natural speed; the app's tempo is
+# a playback-only time-stretch and intentionally not baked into the file.
+
+def _render_pcm(req: ExportRequest, voice: Voice) -> bytes:
+    """Synthesize the full text on the inference thread and return all PCM."""
+    if req.model and req.model != engine.model_key:
+        engine.load(req.model)
+    chunks = engine.synthesize_pcm16(req.text, voice, 1.0,
+                                     temperature=req.temperature,
+                                     repetition_penalty=req.repetition_penalty)
+    return b"".join(chunks)
+
+
+def _pcm_to_wav(pcm: bytes, rate: int) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)         # 16-bit
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return buf.getvalue()
+
+
+def _pcm_to_mp3(pcm: bytes, rate: int) -> bytes:
+    """Encode 16-bit mono PCM to MP3 via ffmpeg (stdin -> stdout)."""
+    proc = subprocess.run(
+        [FFMPEG, "-loglevel", "error", "-f", "s16le", "-ar", str(rate), "-ac", "1",
+         "-i", "pipe:0", "-codec:a", "libmp3lame", "-b:a", "128k", "-f", "mp3", "pipe:1"],
+        input=pcm, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+    )
+    return proc.stdout
+
+
+@app.post("/export", tags=["Export"],
+          summary="Gesamttext als Audiodatei erzeugen (WAV oder MP3)",
+          responses={
+              200: {
+                  "description": "Fertige Audiodatei. Der Header X-Audio-Format nennt das "
+                                 "tatsächliche Format ('mp3' oder 'wav'), X-Audio-Duration-Seconds "
+                                 "die Länge in Sekunden, X-Audio-Sample-Rate die Abtastrate.",
+                  "content": {"audio/mpeg": {}, "audio/wav": {}},
+              },
+              400: {"description": "Leerer Text, unbekanntes Format oder unbekannter Modell-Schlüssel."},
+              413: {"description": "Text länger als das Limit (50000 Zeichen)."},
+          })
+async def export(req: ExportRequest) -> Response:
+    """Synthetisiert den kompletten Text und gibt ihn als fertige Datei zurück.
+
+    MP3 entsteht, wenn ffmpeg vorhanden ist; sonst (oder bei `format=wav`) WAV.
+    Fehlt ffmpeg trotz `format=mp3`, wird still auf WAV zurückgestuft - das
+    tatsächliche Format steht im Header `X-Audio-Format`.
+    """
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="empty text")
+    if len(text) > _SPEAK_TEXT_MAX:
+        raise HTTPException(status_code=413, detail=f"text too long (max {_SPEAK_TEXT_MAX})")
+    if req.model is not None and req.model not in MODELS:
+        raise HTTPException(status_code=400,
+                            detail=f"unknown model {req.model!r}; choose {list(MODELS)}")
+    fmt = (req.format or ("mp3" if FFMPEG else "wav")).lower()
+    if fmt not in ("mp3", "wav"):
+        raise HTTPException(status_code=400, detail="format must be 'mp3' or 'wav'")
+
+    voice = _resolve_voice_key(req.voice)
+    pcm = await _run_infer(_render_pcm, req, voice)
+    if not pcm:
+        raise HTTPException(status_code=500, detail="no audio produced")
+    rate = engine.sample_rate
+
+    data = None
+    if fmt == "mp3" and FFMPEG:
+        try:
+            data = await asyncio.to_thread(_pcm_to_mp3, pcm, rate)
+        except Exception:  # noqa: BLE001 -- fall back to WAV if the encoder fails
+            data = None
+    if data is None:
+        fmt = "wav"
+        data = _pcm_to_wav(pcm, rate)
+
+    duration = len(pcm) / 2 / rate       # 16-bit mono -> 2 bytes per sample
+    headers = {
+        "Content-Disposition": f'attachment; filename="pappagei.{fmt}"',
+        "X-Audio-Format": fmt,
+        "X-Audio-Duration-Seconds": f"{duration:.3f}",
+        "X-Audio-Sample-Rate": str(rate),
+    }
+    media = "audio/mpeg" if fmt == "mp3" else "audio/wav"
+    return Response(content=data, media_type=media, headers=headers)
+
+
+# --- title: optional short title via a local LLM ------------------------------
+# Best-effort and fully optional: if no OpenAI-compatible model is reachable at
+# LLM_BASE_URL, every path returns an empty title instead of raising.
+
+def _http_json(url: str, payload: Optional[dict] = None, timeout: float = 5.0) -> dict:
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    req = urllib.request.Request(
+        url, data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST" if body is not None else "GET",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _llm_model() -> Optional[str]:
+    """The model to use: a fixed override, else the first one loaded remotely."""
+    if LLM_MODEL:
+        return LLM_MODEL
+    try:
+        info = _http_json(LLM_BASE_URL + "/models", timeout=2.0)
+        models = info.get("data") or []
+        return models[0]["id"] if models else None
+    except Exception:  # noqa: BLE001 -- LLM is optional; treat any error as "none"
+        return None
+
+
+def _clean_title(raw: str) -> str:
+    lines = [ln.strip() for ln in (raw or "").splitlines() if ln.strip()]
+    t = lines[-1] if lines else ""          # skip any leading "reasoning" lines
+    # Peel wrapping quotes and trailing punctuation until nothing changes, so
+    # interleaved cases like  "Titel".  come out clean.
+    prev = None
+    while t != prev:
+        prev = t
+        t = t.strip().strip("\"'«»„“”‚‘’").strip()
+        while t and t[-1] in ".!?:;,":
+            t = t[:-1].strip()
+    return t[:80]
+
+
+def _generate_title(text: str, model: str) -> Optional[str]:
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system",
+             "content": "Du erzeugst einen kurzen, treffenden Titel auf Deutsch für einen Text. "
+                        "Fasse den Inhalt in 2 bis 6 Wörtern zusammen. Antworte NUR mit dem Titel, "
+                        "ohne Anführungszeichen und ohne Satzzeichen am Ende."},
+            {"role": "user", "content": text[:4000]},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 32,
+        "stream": False,
+    }
+    try:
+        resp = _http_json(LLM_BASE_URL + "/chat/completions", payload, timeout=30.0)
+        content = resp["choices"][0]["message"]["content"]
+        return _clean_title(content) or None
+    except Exception:  # noqa: BLE001 -- title stays empty if the LLM cannot answer
+        return None
+
+
+@app.post("/title", response_model=TitleResponse, tags=["Export"],
+          summary="Kurzen Titel für den Text erzeugen (optional, per lokalem LLM)")
+async def title(req: TitleRequest) -> dict:
+    """Erzeugt einen kurzen Titel, wenn ein lokales LLM erreichbar ist.
+
+    Ist keins geladen (oder antwortet es nicht), kommt `title: null` zurück -
+    die App lässt den Titel dann einfach leer.
+    """
+    text = req.text.strip()
+    if not text:
+        return {"title": None, "model": None}
+    model = await asyncio.to_thread(_llm_model)
+    if not model:
+        return {"title": None, "model": None}
+    generated = await asyncio.to_thread(_generate_title, text, model)
+    return {"title": generated, "model": model if generated else None}
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ info:
     \ (`/speak`) nimmt Text von lokalen Werkzeugen wie der\n  Browser-Erweiterung an; gesprochen wird\
     \ in der App selbst.\n\nInteraktive Oberfläche: [/docs](/docs) - maschinenlesbar: [/openapi.json](/openapi.json),\n\
     im Repo als `docs/api.yaml`.\n"
-  version: 0.3.1
+  version: 0.4.0
 paths:
   /health:
     get:
@@ -292,6 +292,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /export:
+    post:
+      tags:
+      - Export
+      summary: Gesamttext als Audiodatei erzeugen (WAV oder MP3)
+      description: 'Synthetisiert den kompletten Text und gibt ihn als fertige Datei zurück.
+
+
+        MP3 entsteht, wenn ffmpeg vorhanden ist; sonst (oder bei `format=wav`) WAV.
+
+        Fehlt ffmpeg trotz `format=mp3`, wird still auf WAV zurückgestuft - das
+
+        tatsächliche Format steht im Header `X-Audio-Format`.'
+      operationId: export_export_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportRequest'
+        required: true
+      responses:
+        '200':
+          description: Fertige Audiodatei. Der Header X-Audio-Format nennt das tatsächliche Format ('mp3'
+            oder 'wav'), X-Audio-Duration-Seconds die Länge in Sekunden, X-Audio-Sample-Rate die Abtastrate.
+          content:
+            application/json:
+              schema: {}
+            audio/mpeg: {}
+            audio/wav: {}
+        '400':
+          description: Leerer Text, unbekanntes Format oder unbekannter Modell-Schlüssel.
+        '413':
+          description: Text länger als das Limit (50000 Zeichen).
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /title:
+    post:
+      tags:
+      - Export
+      summary: Kurzen Titel für den Text erzeugen (optional, per lokalem LLM)
+      description: 'Erzeugt einen kurzen Titel, wenn ein lokales LLM erreichbar ist.
+
+
+        Ist keins geladen (oder antwortet es nicht), kommt `title: null` zurück -
+
+        die App lässt den Titel dann einfach leer.'
+      operationId: title_title_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TitleRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TitleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     DeleteVoiceResponse:
@@ -304,6 +374,51 @@ components:
       required:
       - deleted
       title: DeleteVoiceResponse
+    ExportRequest:
+      properties:
+        text:
+          type: string
+          title: Text
+          description: Der Gesamttext, der als Audiodatei erzeugt werden soll.
+          example: Ein längerer Text, der als Datei gesichert wird.
+        voice:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Voice
+          description: Id oder Name einer eigenen Stimme, oder ein eingebauter Sprecher (siehe GET /voices).
+            Ohne Angabe spricht der Standard-Sprecher.
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+          description: Modell-Schlüssel '0.6b' oder '1.7b'; ohne Angabe bleibt das aktuell geladene Modell
+            aktiv.
+        format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Format
+          description: '''mp3'' oder ''wav''. Ohne Angabe MP3, wenn ffmpeg vorhanden ist, sonst WAV. Fehlt
+            ffmpeg, wird MP3 automatisch auf WAV zurückgestuft; das tatsächliche Format steht im Header
+            X-Audio-Format.'
+        temperature:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Temperature
+          description: Sampling-Temperatur (etwa 0.3 bis 1.0).
+        repetition_penalty:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Repetition Penalty
+          description: Wiederholungs-Strafe (etwa 1.0 bis 1.3).
+      type: object
+      required:
+      - text
+      title: ExportRequest
     HTTPValidationError:
       properties:
         detail:
@@ -470,6 +585,35 @@ components:
       required:
       - text
       title: SynthRequest
+    TitleRequest:
+      properties:
+        text:
+          type: string
+          title: Text
+          description: Text, für den ein kurzer Titel erzeugt werden soll.
+          example: Ein Text über Katzen und ihre Gewohnheiten.
+      type: object
+      required:
+      - text
+      title: TitleRequest
+    TitleResponse:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+          description: Der erzeugte Titel, oder null, wenn kein LLM verfügbar ist.
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+          description: Das LLM, das den Titel erzeugt hat, oder null.
+      type: object
+      required:
+      - title
+      title: TitleResponse
     ValidationError:
       properties:
         loc:
@@ -576,5 +720,7 @@ tags:
   description: Zwischen den TTS-Modellen wechseln.
 - name: Synthese
   description: Text in Audio umwandeln (Streaming).
+- name: Export
+  description: Text als fertige Audiodatei erzeugen (WAV oder MP3) und optional einen Titel dazu.
 - name: Vorlese-Brücke
   description: Text zum Vorlesen an die App übergeben (genutzt von der Browser-Erweiterung).

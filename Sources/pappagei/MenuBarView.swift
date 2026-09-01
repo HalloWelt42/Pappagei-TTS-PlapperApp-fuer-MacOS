@@ -4,6 +4,7 @@ import Combine
 
 struct MenuBarView: View {
     @ObservedObject private var c = SpeechController.shared
+    @ObservedObject private var exporter = AudioExporter.shared
     @Environment(\.openWindow) private var openWindow
     @State private var axTrusted = AccessibilityPermission.isTrusted
     @State private var showAdvanced = false
@@ -38,6 +39,7 @@ struct MenuBarView: View {
         .frame(width: 300)
         .onAppear { axTrusted = AccessibilityPermission.isTrusted }
         .onReceive(axTimer) { _ in axTrusted = AccessibilityPermission.isTrusted }
+        .onChange(of: c.exportSource) { _, _ in exporter.invalidate() }
     }
 
     private var header: some View {
@@ -75,6 +77,30 @@ struct MenuBarView: View {
                 Image(systemName: "stop.fill")
             }
             .disabled(!c.isBusy)
+            saveControl
+        }
+    }
+
+    /// Save the current utterance as an audio file. The icon and hover text
+    /// reflect the export state; a fresh file's tooltip shows title, length and
+    /// size, and a click saves it.
+    @ViewBuilder
+    private var saveControl: some View {
+        let display = exporter.display(for: c.exportSource)
+        if case .generating = display {
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 22)
+                .help("Aufnahme wird erzeugt ...")
+        } else {
+            Button {
+                exporter.primaryAction(for: c.exportSource)
+            } label: {
+                Image(systemName: saveIcon(display))
+                    .foregroundStyle(saveTint(display))
+            }
+            .disabled(!saveEnabled(display))
+            .help(saveHelp(display))
         }
     }
 
@@ -184,6 +210,82 @@ struct MenuBarView: View {
             Spacer()
             Button("Beenden") { c.quit() }
         }
+    }
+
+    // MARK: save control helpers
+
+    private func saveIcon(_ display: AudioExporter.Display) -> String {
+        switch display {
+        case .available: return "square.and.arrow.down.fill"
+        case .failed: return "exclamationmark.triangle"
+        default: return "square.and.arrow.down"
+        }
+    }
+
+    private func saveTint(_ display: AudioExporter.Display) -> Color {
+        switch display {
+        case .available: return .green
+        case .failed: return .orange
+        case .unavailable: return .secondary
+        default: return .primary
+        }
+    }
+
+    private func saveEnabled(_ display: AudioExporter.Display) -> Bool {
+        switch display {
+        case .unavailable, .generating: return false
+        case .available: return true
+        case .ready, .failed: return canGenerate
+        }
+    }
+
+    /// Generation needs a ready model; saving an already-made file does not.
+    private var canGenerate: Bool {
+        switch c.status {
+        case .starting, .downloadingOrLoading, .error: return false
+        default: return true
+        }
+    }
+
+    private func saveHelp(_ display: AudioExporter.Display) -> String {
+        switch display {
+        case .unavailable:
+            return "Zuerst etwas vorlesen, dann als Audiodatei sichern"
+        case .ready:
+            return canGenerate
+                ? "Aktuellen Vorlese-Text als Audiodatei erzeugen"
+                : "Modell lädt noch - gleich als Audiodatei sicherbar"
+        case .generating:
+            return "Aufnahme wird erzeugt ..."
+        case .available(let meta):
+            return availableHelp(meta)
+        case .failed(let message):
+            return "\(message) - zum erneuten Versuch klicken"
+        }
+    }
+
+    private func availableHelp(_ meta: AudioExporter.Meta) -> String {
+        let titleLine: String
+        if meta.titlePending {
+            titleLine = "Titel: wird ermittelt ..."
+        } else if let title = meta.title, !title.isEmpty {
+            titleLine = "Titel: \(title)"
+        } else {
+            titleLine = "Titel: -"
+        }
+        let size = ByteCountFormatter.string(fromByteCount: Int64(meta.bytes), countStyle: .file)
+        return [
+            titleLine,
+            "Länge: \(formatDuration(meta.duration))",
+            "Größe: \(size)",
+            "Format: \(meta.format.uppercased())",
+            "Klicken zum Speichern",
+        ].joined(separator: "\n")
+    }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     private var voiceBinding: Binding<String> {

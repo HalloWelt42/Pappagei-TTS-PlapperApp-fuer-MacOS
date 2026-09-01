@@ -26,7 +26,8 @@ struct VoiceManagerView: View {
                             Text(voice.name)
                             Spacer()
                             Button {
-                                c.speak(text: SpeechController.previewText, voice: voice.id)
+                                c.speak(text: SpeechController.previewText, voice: voice.id,
+                                        isPreview: true)
                             } label: {
                                 Image(systemName: "play.circle")
                             }
@@ -66,7 +67,8 @@ struct VoiceManagerView: View {
             }
 
             Button {
-                c.speak(text: SpeechController.previewText)
+                c.speak(text: SpeechController.previewText, voice: c.selectedVoice,
+                        isPreview: true)
             } label: {
                 Label("Hörprobe der gewählten Stimme", systemImage: "play.circle")
             }
